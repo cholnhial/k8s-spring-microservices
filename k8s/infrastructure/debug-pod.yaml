@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+    name: debug-pod
+    namespace: shopnow
+    labels:
+      app: debug
+      part-of: shopnow
+spec:
+  containers:
+    - name: busybox
+      image: busybox:latest
+      imagePullPolicy: IfNotPresent
+      command: ["sleep", "3600"] # Keep the pod alive for 1 hour
+      resources:
+        requests:
+          memory: "32Mi"
+          cpu: "50m"
+        limits:
+          memory: "64Mi"
+          cpu: "100m"
+      restartPolicy: Never

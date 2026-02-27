@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discovery-server
+  namespace: shopnow
+  labels:
+    app: discovery-server
+    part-of: shopnow
+    version: "1.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: discovery-server
+  template:
+    metadata:
+      labels:
+        app: discovery-server
+        part-of: shopnow
+    spec:
+      containers:
+        - name: discovery-server
+          image: steeltoeoss/eureka-server:latest
+          ports:
+            - containerPort: 8761
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
