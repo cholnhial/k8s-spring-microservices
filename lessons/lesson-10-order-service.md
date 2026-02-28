@@ -1,20 +1,362 @@
-# order-service — Namespaces & Resource Limits: Order Service
+# Lesson 10 — Namespaces & Resource Limits: Order Service
 
 **Status:** [ ] Complete
-**K8s Concepts:** ResourceQuota, LimitRange, resource requests/limits
-**Spring Boot Concepts:** Saga pattern, distributed transactions
+**K8s Concepts:** ResourceQuota, LimitRange, resource requests/limits (deep dive)
+**Spring Boot Concepts:** Spring Data JPA, REST, OpenFeign (inter-service calls)
 
 ---
 
-## Concept
+## Concept: Requests vs Limits
 
-> _This lesson will be fleshed out when you reach it. Concepts, diagrams, and tasks will be added here._
+Every container in this project sets `resources.requests` and `resources.limits`.
+This is not optional — it is how K8s schedules and protects workloads.
+
+| Field | What it means | Effect when exceeded |
+|---|---|---|
+| `requests.memory` | Guaranteed minimum | Used for scheduling (K8s won't place pod on a node without this much free) |
+| `limits.memory` | Hard cap | Container is **OOMKilled** (restarted) |
+| `requests.cpu` | Guaranteed share | Used for scheduling |
+| `limits.cpu` | Hard cap | Container is **throttled** (not killed) |
+
+> You saw this in action in Lesson 07 — the discovery-server was OOMKilled because its
+> memory limit (512Mi) was lower than the JVM's fixed region requirements (~623MB).
+
+### The scheduling rule
+
+K8s schedules a pod on a node based on **requests**, not limits. A pod with
+`requests.memory: 256Mi` and `limits.memory: 768Mi` will be scheduled on any node
+with 256Mi free — but can use up to 768Mi at runtime.
+
+---
+
+## Concept: LimitRange
+
+A **LimitRange** sets default requests/limits for any container in a namespace that
+does not specify its own. It also enforces maximum values.
+
+Without a LimitRange, a developer can accidentally deploy a container with no resource
+spec — which the scheduler treats as requesting 0 CPU and 0 memory, meaning it could
+be placed on any node and consume unbounded resources.
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: shopnow-limits
+  namespace: shopnow
+spec:
+  limits:
+    - type: Container
+      default:            # applied if a container sets no limits
+        memory: "512Mi"
+        cpu: "500m"
+      defaultRequest:     # applied if a container sets no requests
+        memory: "256Mi"
+        cpu: "250m"
+      max:                # no container may exceed these
+        memory: "1Gi"
+        cpu: "2"
+```
+
+---
+
+## Concept: ResourceQuota
+
+A **ResourceQuota** caps the **total** resource consumption across all pods in a namespace.
+It prevents a single namespace from starving the rest of the cluster.
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: shopnow-quota
+  namespace: shopnow
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    pods: "20"
+```
 
 ---
 
 ## Your Task
 
-> _Tasks will be added here as scaffolding when you reach this lesson._
+### 1. Apply the LimitRange and ResourceQuota
+
+Create `k8s/namespaces/limitrange.yaml`:
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: shopnow-limits
+  namespace: shopnow
+spec:
+  limits:
+    - type: Container
+      default:
+        memory: "512Mi"
+        cpu: "500m"
+      defaultRequest:
+        memory: "256Mi"
+        cpu: "250m"
+      max:
+        memory: "1Gi"
+        cpu: "2"
+```
+
+Create `k8s/namespaces/resourcequota.yaml`:
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: shopnow-quota
+  namespace: shopnow
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    pods: "20"
+```
+
+Apply both:
+
+```bash
+kubectl apply -f k8s/namespaces/limitrange.yaml
+kubectl apply -f k8s/namespaces/resourcequota.yaml
+
+# Inspect what is now enforced
+kubectl describe limitrange shopnow-limits -n shopnow
+kubectl describe resourcequota shopnow-quota -n shopnow
+```
+
+### 2. Implement the Order Service Spring Boot app
+
+In `services/order-service/`, create a Spring Boot app. Required `pom.xml` dependencies:
+
+```xml
+<!-- REST -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-web</artifactId>
+</dependency>
+
+<!-- JPA + PostgreSQL -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-jpa</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <scope>runtime</scope>
+</dependency>
+
+<!-- Health probes -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+
+<!-- Synchronous calls to product-service / inventory-service -->
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-openfeign</artifactId>
+</dependency>
+
+<!-- Service discovery -->
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
+
+<!-- Fetch config from config-server -->
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-config</artifactId>
+</dependency>
+```
+
+Local `src/main/resources/application.yml`:
+
+```yaml
+spring:
+  application:
+    name: order-service
+  config:
+    import: "configserver:http://config-server:8888"
+```
+
+Add to your `shopnow-config` git repo as `order-service.yaml`:
+
+```yaml
+server:
+  port: 8082
+
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres-order:5432/orderdb
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://discovery-server:8761/eureka
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health
+```
+
+You implement: `Order` entity, `OrderRepository`, `OrderController`.
+Use `@FeignClient` to call `product-service` to validate products exist before creating an order.
+
+### 3. Create a Secret for the order database
+
+Following the same pattern as Lesson 06 step 5:
+
+```bash
+kubectl create secret generic order-db-credentials \
+  --from-literal=POSTGRES_DB=orderdb \
+  --from-literal=POSTGRES_USER=shopnow \
+  --from-literal=POSTGRES_PASSWORD=changeme \
+  -n shopnow
+```
+
+### 4. Create the Deployment
+
+Create `k8s/order-service/deployment.yaml`:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: shopnow
+  labels:
+    app: order-service
+    part-of: shopnow
+    version: "1.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+        part-of: shopnow
+        version: "1.0"
+    spec:
+      containers:
+        - name: order-service
+          image: shopnow/order-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8082
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: order-db-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: order-db-credentials
+                  key: POSTGRES_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+```
+
+### 5. Create the Service
+
+Create `k8s/order-service/service.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: shopnow
+  labels:
+    app: order-service
+    part-of: shopnow
+    version: "1.0"
+spec:
+  selector:
+    app: order-service
+  ports:
+    - port: 8082
+      targetPort: 8082
+```
+
+### 6. Build and deploy
+
+```bash
+eval $(minikube docker-env)
+cd services/order-service
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/order-service:latest
+cd ../..
+
+kubectl apply -f k8s/order-service/deployment.yaml
+kubectl apply -f k8s/order-service/service.yaml
+kubectl rollout status deployment/order-service -n shopnow --timeout=120s
+```
+
+### 7. Observe resource enforcement
+
+```bash
+# See how much of the quota is currently consumed
+kubectl describe resourcequota shopnow-quota -n shopnow
+
+# Try to deploy a pod that exceeds the LimitRange max (1Gi) — should be rejected
+kubectl run oversize --image=nginx:alpine \
+  --requests='memory=2Gi' \
+  --limits='memory=2Gi' \
+  -n shopnow
+# Expected: Error — exceeds max memory 1Gi from LimitRange
+```
 
 ---
 
@@ -26,4 +368,4 @@
 
 ## Up Next
 
-_See [CLAUDE.md](../CLAUDE.md) for the curriculum order._
+[Lesson 11 — Circuit Breaker & Resilience: Inventory Service](lesson-11-inventory-service.md)
