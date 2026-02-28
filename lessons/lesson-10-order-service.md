@@ -82,6 +82,66 @@ spec:
 
 ---
 
+## Concept: How Services Communicate (Synchronous HTTP via OpenFeign + Eureka)
+
+When order-service needs to validate that a product exists before creating an order, it
+makes a **synchronous HTTP call** to product-service. The call chain looks like this:
+
+```
+Client
+  │
+  │  POST /api/orders
+  ▼
+order-service
+  │
+  │  1. "Where is product-service?" → asks Eureka
+  │  2. Eureka returns: 10.244.x.x:8081
+  │  3. GET http://10.244.x.x:8081/api/products/{id}
+  ▼
+product-service
+  │
+  │  4. Returns ProductResponse (or 404)
+  ▼
+order-service
+  │  5a. Product found  → save order → return 201
+  │  5b. Product 404   → return 404 "Product not found"
+```
+
+### OpenFeign — declarative HTTP client
+
+Instead of writing `RestClient` boilerplate, you declare an interface and Spring generates
+the HTTP implementation at runtime:
+
+```java
+@FeignClient(name = "product-service")   // name must match spring.application.name
+public interface ProductClient {
+    @GetMapping("/api/products/{id}")
+    ProductResponse findById(@PathVariable Long id);
+}
+```
+
+The `name = "product-service"` is the Eureka service name. OpenFeign asks Eureka
+for the address, so **no hardcoded URLs** — it works regardless of which pod IP
+product-service is running on, and automatically load-balances if there are multiple
+replicas.
+
+Add `@EnableFeignClients` to your main class to activate this:
+
+```java
+@SpringBootApplication
+@EnableFeignClients
+public class OrderServiceApplication { ... }
+```
+
+### Synchronous vs Asynchronous
+
+This pattern is **synchronous** — if product-service is down, the order request fails
+immediately. That is a deliberate coupling trade-off. The async alternative (publishing
+an event to Kafka and letting product-service respond asynchronously) is covered in
+Lesson 14 with notification-service.
+
+---
+
 ## Your Task
 
 ### 1. Apply the LimitRange and ResourceQuota
@@ -190,7 +250,7 @@ spring:
   application:
     name: order-service
   config:
-    import: "configserver:http://config-server:8888"
+    import: "optional:configserver:http://config-server:8888"
 ```
 
 Add to your `shopnow-config` git repo as `order-service.yaml`:
@@ -224,8 +284,55 @@ management:
         include: health
 ```
 
-You implement: `Order` entity, `OrderRepository`, `OrderController`.
-Use `@FeignClient` to call `product-service` to validate products exist before creating an order.
+**Yes, the business logic needs to be implemented before you can build and deploy.**
+You can write it yourself or ask Claude to generate it. Either way, here is the spec:
+
+---
+
+#### Order Service — High-Level Spec
+
+**`OrderStatus` enum**
+
+```
+PENDING, CONFIRMED, CANCELLED
+```
+
+**`OrderLineItem` entity** (child of Order)
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `Long` | Auto-generated primary key |
+| `skuCode` | `String` | Matches the product's skuCode |
+| `price` | `BigDecimal` | Captured at time of order (not live) |
+| `quantity` | `Integer` | Number of units ordered |
+
+**`Order` entity**
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `Long` | Auto-generated primary key |
+| `orderNumber` | `String` | UUID-generated, unique |
+| `status` | `OrderStatus` | Defaults to `PENDING` on creation |
+| `createdAt` | `LocalDateTime` | Set on creation |
+| `orderLineItems` | `List<OrderLineItem>` | One-to-many, cascade all |
+
+**`ProductClient`** (Feign interface — calls product-service)
+
+| Method | Calls |
+|---|---|
+| `findById(Long id)` | `GET /api/products/{id}` on product-service |
+
+**`OrderController`** — REST endpoints under `/api/orders`
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/orders` | Return all orders |
+| `GET` | `/api/orders/{id}` | Return one order |
+| `POST` | `/api/orders` | Create an order — for each line item, call product-service to verify the product exists and capture its current price; return `404` if any product is not found |
+
+Return `404` when an order is not found. No authentication required at this stage.
+
+---
 
 ### 3. Create a Secret for the order database
 
