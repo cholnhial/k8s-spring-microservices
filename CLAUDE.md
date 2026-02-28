@@ -92,7 +92,7 @@ Tick a box by changing `[ ]` to `[x]`.
 
 - [x] **Lesson 05** — [ConfigMaps & Secrets: Spring Cloud Config Server](lessons/lesson-05-config.md)
 - [x] **Lesson 06** — [StatefulSets & PVCs: Running PostgreSQL](lessons/lesson-06-statefulsets.md)
-- [ ] **Lesson 07** — [Service Discovery: Deploying Eureka](lessons/lesson-07-discovery.md)
+- [x] **Lesson 07** — [Service Discovery: Deploying Eureka](lessons/lesson-07-discovery.md)
 
 ### Phase 3 — Core Application Services
 

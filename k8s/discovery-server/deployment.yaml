@@ -17,16 +17,24 @@ spec:
       labels:
         app: discovery-server
         part-of: shopnow
+        version: "1.0"
     spec:
       containers:
         - name: discovery-server
-          image: steeltoeoss/eureka-server:latest
+          image: shopnow/discovery-server:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 8761
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            initialDelaySeconds: 60   # Eureka takes ~30-60s to fully start
+            periodSeconds: 10
           resources:
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "250m"
             limits:
-              memory: "512Mi"
+              memory: "768Mi"    # Eureka's fixed JVM regions alone exceed 600MB; 512Mi is too low
               cpu: "500m"

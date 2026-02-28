@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: discovery-server
+
+server:
+  port: 8761
+
+eureka:
+  instance:
+    hostname: discovery-server        # K8s DNS name other services will use
+  client:
+    register-with-eureka: false       # Don't register with itself
+    fetch-registry: false             # Don't fetch registry from itself
+  server:
+    wait-time-in-ms-when-sync-empty: 0  # Start immediately without waiting for peers
