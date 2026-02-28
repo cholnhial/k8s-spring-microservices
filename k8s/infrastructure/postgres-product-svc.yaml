@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-product
+  namespace: shopnow
+spec:
+  clusterIP: None       # Headless — no virtual IP, DNS resolves to Pod IPs directly
+  selector:
+    app: postgres-product
+  ports:
+    - port: 5432
+      targetPort: 5432

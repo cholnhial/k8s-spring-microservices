@@ -1,6 +1,6 @@
 # Lesson 06 — StatefulSets & PVCs: Running PostgreSQL
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** StatefulSet, PersistentVolume (PV), PersistentVolumeClaim (PVC), StorageClass
 **Spring Boot Concepts:** Spring Data JPA, Flyway migrations
 
