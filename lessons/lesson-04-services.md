@@ -1,6 +1,6 @@
 # Lesson 04 — Services & Networking: Exposing Workloads
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** Service (ClusterIP, NodePort, LoadBalancer), DNS, kube-proxy, Endpoints
 **Spring Boot Concepts:** Service-to-service HTTP calls, Eureka client registration
 
@@ -54,6 +54,7 @@ metadata:
   labels:
     app: discovery-server
     part-of: shopnow
+    version: "1.0"
 spec:
   type: ClusterIP            # Only reachable inside the cluster
   selector:
@@ -92,6 +93,10 @@ kind: Service
 metadata:
   name: discovery-server-external
   namespace: shopnow
+  labels:
+    app: discovery-server
+    part-of: shopnow
+    version: "1.0"
 spec:
   type: NodePort
   selector:
@@ -139,6 +144,8 @@ eureka.client.service-url.defaultZone: http://discovery-server:8761/eureka
 ## Notes & Learnings
 
 > _Record anything surprising, problems you hit, or insights you had._
+
+- What happens when endpoints scale?
 
 ---
 

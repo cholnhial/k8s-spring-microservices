@@ -86,11 +86,11 @@ Tick a box by changing `[ ]` to `[x]`.
 - [x] **Lesson 01** — [Project Overview & Minikube Setup](lessons/lesson-01-setup.md)
 - [x] **Lesson 02** — [Pods & Containers: The Atomic Unit of K8s](lessons/lesson-02-pods.md)
 - [x] **Lesson 03** — [Deployments & ReplicaSets: Self-Healing Workloads](lessons/lesson-03-deployments.md)
-- [ ] **Lesson 04** — [Services & Networking: Exposing Workloads](lessons/lesson-04-services.md)
+- [x] **Lesson 04** — [Services & Networking: Exposing Workloads](lessons/lesson-04-services.md)
 
 ### Phase 2 — Infrastructure Services
 
-- [ ] **Lesson 05** — [ConfigMaps & Secrets: Spring Cloud Config Server](lessons/lesson-05-config.md)
+- [x] **Lesson 05** — [ConfigMaps & Secrets: Spring Cloud Config Server](lessons/lesson-05-config.md)
 - [ ] **Lesson 06** — [StatefulSets & PVCs: Running PostgreSQL](lessons/lesson-06-statefulsets.md)
 - [ ] **Lesson 07** — [Service Discovery: Deploying Eureka](lessons/lesson-07-discovery.md)
 

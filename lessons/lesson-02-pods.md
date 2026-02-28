@@ -2,7 +2,7 @@
 
 **Status:** [x] Complete
 **K8s Concepts:** Pod, container, `kubectl run`, `kubectl exec`, `kubectl logs`, image pull policy
-**Spring Boot Concepts:** Docker image building, Dockerfile
+**Spring Boot Concepts:** Cloud Native Buildpacks, image pull policy
 
 ---
 
@@ -42,42 +42,62 @@ new IP address. This is why we need **Services** (Lesson 04) to provide stable n
 
 When Minikube runs a container it pulls images from a registry (Docker Hub by default).
 For local development we build images **directly into Minikube's Docker daemon** so we never
-need to push to a registry:
-
-```bash
-eval $(minikube docker-env)    # Point your shell's Docker CLI at Minikube's daemon
-docker build -t shopnow/my-app:latest .
-```
+need to push to a registry.
 
 Set `imagePullPolicy: Never` in your Pod spec to tell K8s to use the locally cached image.
+
+### Building images with Cloud Native Buildpacks (no Dockerfile needed)
+
+Instead of writing a Dockerfile, Spring Boot 3.x ships with built-in support for
+**Cloud Native Buildpacks** via the Maven plugin. Buildpacks analyse your project and
+produce a layered, production-ready OCI image automatically.
+
+This is the pattern used for **every service** in this project:
+
+```bash
+# Point Docker at Minikube's daemon (once per shell session)
+eval $(minikube docker-env)
+
+# Build the image — no Dockerfile required
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/<service-name>:latest
+```
+
+**What Buildpacks give you for free:**
+- A JVM sized correctly for the container's memory limits
+- CA certificate injection into the JVM truststore
+- Security patches without touching your source code
+- Layer caching — only changed layers are rebuilt
+
+**One important consequence:** the working directory inside a Buildpacks image is
+`/workspace`. When Spring Boot searches for external config files via `file:./config/`,
+it resolves to `/workspace/config/` — not `/config/`. Always mount ConfigMaps at
+`/workspace/config` in your Deployment. (Covered in Lesson 05.)
 
 ---
 
 ## Your Task
 
-### 1. Write a minimal Dockerfile for a Spring Boot app
+### 1. Build a Spring Boot image with Buildpacks
 
-You will use this same pattern for every service in the project.
+You will use this same pattern for every service in the project. You do not need a real
+Spring Boot app yet — we will build product-service in Lesson 08. For now, run the command
+against config-server (which already exists) to see Buildpacks in action:
 
-Create `services/product-service/Dockerfile`:
+```bash
+# Point Docker at Minikube's daemon
+eval $(minikube docker-env)
 
-```dockerfile
-# --- Stage 1: Build ---
-FROM eclipse-temurin:21-jdk AS builder
-WORKDIR /app
-COPY . .
-RUN ./mvnw package -DskipTests
+# Build — watch Buildpacks detect the Spring Boot project and assemble the image
+cd services/config-server
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/config-server:latest
+cd ../..
 
-# --- Stage 2: Run ---
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-COPY --from=builder /app/target/*.jar app.jar
-EXPOSE 8081
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Verify the image is now in Minikube's image cache
+docker images | grep shopnow
 ```
 
-> You do not need a real Spring Boot app yet. We will build the product service in Lesson 08.
-> For now, this Dockerfile is a template to understand multi-stage builds.
+> **Note:** The first build downloads Buildpack layers and takes a few minutes.
+> Subsequent builds are significantly faster due to layer caching.
 
 ### 2. Run a one-off Pod to explore K8s
 

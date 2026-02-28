@@ -1,6 +1,6 @@
 # Lesson 05 — ConfigMaps & Secrets: Spring Cloud Config Server
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** ConfigMap, Secret, environment variables, volume mounts
 **Spring Boot Concepts:** Spring Cloud Config Server, `bootstrap.yml`, config client
 
@@ -45,14 +45,52 @@ kubectl create secret generic pg-credentials \
 
 ## Your Task
 
-### 1. Build the Spring Cloud Config Server
+### 1. The Spring Cloud Config Server (already implemented)
 
-In `services/config-server/`, create a Spring Boot app that:
-- Has `spring-cloud-config-server` dependency
-- Reads config from a Git repo (or local filesystem for simplicity)
-- Is annotated with `@EnableConfigServer`
+The app lives in `services/config-server/`. Here is what each file does and why.
 
-> I will scaffold the `pom.xml` and `application.yml` for you. You implement the class.
+**`ConfigServerApplication.java`** — the only Spring Boot code needed:
+
+```java
+@SpringBootApplication
+@EnableConfigServer          // turns this app into a config server
+public class ConfigServerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigServerApplication.class, args);
+    }
+}
+```
+
+`@EnableConfigServer` activates the `/config-server/{application}/{profile}` HTTP
+endpoints that client services call to fetch their configuration.
+
+---
+
+**`src/main/resources/application.yaml`** — deliberately minimal:
+
+```yaml
+spring:
+  application:
+    name: config-server
+```
+
+This is **all** the local YAML contains. The rest of the config (port, git URI, etc.)
+is provided at runtime by the ConfigMap mounted at `/config` inside the pod. Spring Boot
+always checks `/config/application.yaml` before the classpath, so the mounted file wins.
+
+---
+
+**`pom.xml`** — the only dependency needed beyond the starter parent:
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-config-server</artifactId>
+</dependency>
+```
+
+The Spring Cloud BOM (`spring-cloud-dependencies`) manages the version so you don't
+have to pin it manually.
 
 ### 2. Create the ConfigMap for config-server
 
@@ -89,9 +127,12 @@ kubectl create secret generic git-credentials \
   -n shopnow
 ```
 
-### 4. Mount the ConfigMap as a file in the Deployment
+### 4. Create the Deployment
 
-Create `k8s/config-server/deployment.yaml`:
+Create `k8s/config-server/deployment.yaml`. Note the structure carefully:
+- `env` and `volumeMounts` are **inside** the container spec
+- `volumes` is **outside** the container spec, at the pod `spec` level
+- Use explicit `env` entries (not `envFrom`) so the env var names match the full Spring property path in `UPPER_SNAKE_CASE`
 
 ```yaml
 apiVersion: apps/v1
@@ -99,6 +140,10 @@ kind: Deployment
 metadata:
   name: config-server
   namespace: shopnow
+  labels:
+    app: config-server
+    part-of: shopnow
+    version: "1.0"
 spec:
   replicas: 1
   selector:
@@ -109,6 +154,7 @@ spec:
       labels:
         app: config-server
         part-of: shopnow
+        version: "1.0"
     spec:
       containers:
         - name: config-server
@@ -116,36 +162,80 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8888
+          env:
+            - name: SPRING_CLOUD_CONFIG_SERVER_GIT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: git-credentials
+                  key: username
+            - name: SPRING_CLOUD_CONFIG_SERVER_GIT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: git-credentials
+                  key: password
           volumeMounts:
             - name: config-volume
-              mountPath: /config           # Spring Boot looks here by default
+              mountPath: /workspace/config  # Buildpacks sets workdir to /workspace; Spring Boot resolves ./config/ from there
       volumes:
         - name: config-volume
           configMap:
             name: config-server-config
 ```
 
-### 5. Inject a Secret as environment variables
+> **Common mistakes:** swapping `name` and `mountPath` in `volumeMounts`, placing
+> `volumes` inside the container spec, or putting `envFrom` outside the container.
+
+### 5. Create the Service
+
+Create `k8s/config-server/service.yaml` so other pods (and `port-forward`) can reach
+config-server by its DNS name `config-server.shopnow.svc.cluster.local`:
 
 ```yaml
-# Inside the container spec:
-envFrom:
-  - secretRef:
-      name: git-credentials     # All keys become env vars: USERNAME, PASSWORD
+apiVersion: v1
+kind: Service
+metadata:
+  name: config-server
+  namespace: shopnow
+  labels:
+    app: config-server
+    part-of: shopnow
+    version: "1.0"
+spec:
+  selector:
+    app: config-server
+  ports:
+    - port: 8888
+      targetPort: 8888
 ```
 
-Or individually:
+### 6. Build the image and apply all manifests
 
-```yaml
-env:
-  - name: SPRING_CLOUD_CONFIG_SERVER_GIT_USERNAME
-    valueFrom:
-      secretKeyRef:
-        name: git-credentials
-        key: username
+No Dockerfile is needed. Spring Boot 3.x can build an OCI-compliant image directly
+using **Cloud Native Buildpacks** via the Maven plugin.
+
+```bash
+# Point Docker at Minikube's daemon so the image lands inside the cluster
+eval $(minikube docker-env)
+
+# Build the image (no Dockerfile required)
+cd services/config-server
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/config-server:latest
+cd ../..
+
+# Apply everything in order: ConfigMap first, then Deployment + Service
+kubectl apply -f k8s/config-server/configmap.yaml
+kubectl apply -f k8s/config-server/deployment.yaml
+kubectl apply -f k8s/config-server/service.yaml
+
+# Watch the pod come up
+kubectl get pods -n shopnow -w
 ```
 
-### 6. Verify config server is working
+> **Why Buildpacks?** The Spring Boot Maven plugin calls Buildpacks under the hood,
+> which analyses your project and produces a layered, production-ready image automatically.
+> You get security patches, layer caching, and a JVM tuned for containers — for free.
+
+### 7. Verify config server is working
 
 ```bash
 kubectl port-forward svc/config-server 8888:8888 -n shopnow

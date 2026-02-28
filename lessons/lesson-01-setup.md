@@ -61,7 +61,10 @@ kubectl version --client  # v1.29+ recommended
 # 4. Java
 java --version            # Java 21 required
 
-# 5. Node / Angular CLI (for frontend, needed later)
+# 5. Maven (used by the Spring Boot Buildpacks plugin)
+mvn --version             # 3.9+ recommended
+
+# 6. Node / Angular CLI (for frontend, needed later)
 node --version            # 20+
 ng version                # Angular CLI 17+
 ```

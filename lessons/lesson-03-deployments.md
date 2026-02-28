@@ -46,8 +46,9 @@ if something goes wrong.
 ### 1. Deploy Eureka Discovery Server
 
 We will deploy Eureka first because every other service needs it running.
-You will write the Spring Boot implementation in Lesson 07 — for now use the
-official Spring Cloud Eureka image to learn the Deployment resource.
+You will write the Spring Boot implementation and build the real image in Lesson 07.
+For now, use a plain `nginx:alpine` placeholder so you can learn the Deployment resource
+without needing your own image yet.
 
 Create `k8s/discovery-server/deployment.yaml`:
 
@@ -75,7 +76,7 @@ spec:
     spec:
       containers:
         - name: discovery-server
-          image: steeltoeoss/eureka-server:latest    # placeholder until your image is ready
+          image: nginx:alpine    # placeholder — replaced with shopnow/discovery-server:latest in Lesson 07
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8761
@@ -87,6 +88,14 @@ spec:
               memory: "512Mi"
               cpu: "500m"
 ```
+
+> **Lesson 07:** When you build the real Spring Boot Eureka server, you will replace
+> `nginx:alpine` with `shopnow/discovery-server:latest` built via Buildpacks:
+> ```bash
+> eval $(minikube docker-env)
+> cd services/discovery-server
+> ./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/discovery-server:latest
+> ```
 
 ### 2. Observe the ReplicaSet
 
