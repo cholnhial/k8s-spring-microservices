@@ -8,6 +8,7 @@ server:
 eureka:
   instance:
     hostname: discovery-server        # K8s DNS name other services will use
+    prefer-ip-address: true
   client:
     register-with-eureka: false       # Don't register with itself
     fetch-registry: false             # Don't fetch registry from itself

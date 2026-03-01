@@ -39,6 +39,14 @@ spec:
           volumeMounts:
             - name: config-volume
               mountPath: /workspace/config    # Buildpacks sets workdir to /workspace; Spring Boot resolves ./config/ from there
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+
       volumes:
         - name: config-volume
           configMap:
