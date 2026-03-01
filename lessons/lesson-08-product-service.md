@@ -1,6 +1,6 @@
 # Lesson 08 — Health Probes: Product Service Deployment
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** Startup probe, liveness probe, readiness probe
 **Spring Boot Concepts:** Spring Data JPA, Spring Web, Actuator health indicators, Eureka client
 

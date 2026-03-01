@@ -96,8 +96,8 @@ Tick a box by changing `[ ]` to `[x]`.
 
 ### Phase 3 — Core Application Services
 
-- [ ] **Lesson 08** — [Health Probes: Product Service Deployment](lessons/lesson-08-product-service.md)
-- [ ] **Lesson 09** — [Ingress: API Gateway as the Single Entry Point](lessons/lesson-09-ingress.md)
+- [x] **Lesson 08** — [Health Probes: Product Service Deployment](lessons/lesson-08-product-service.md)
+- [x] **Lesson 09** — [Ingress: API Gateway as the Single Entry Point](lessons/lesson-09-ingress.md)
 - [ ] **Lesson 10** — [Namespaces & Resource Limits: Order Service](lessons/lesson-10-order-service.md)
 - [ ] **Lesson 11** — [Circuit Breaker & Resilience: Inventory Service](lessons/lesson-11-inventory-service.md)
 - [ ] **Lesson 12** — [RBAC & ServiceAccounts: User Service](lessons/lesson-12-user-service.md)

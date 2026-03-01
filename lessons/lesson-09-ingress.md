@@ -1,6 +1,6 @@
 # Lesson 09 — Ingress: API Gateway as the Single Entry Point
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** Ingress, IngressController, path-based routing
 **Spring Boot Concepts:** Spring Cloud Gateway, route configuration
 
