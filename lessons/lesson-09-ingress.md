@@ -104,21 +104,25 @@ server:
 spring:
   cloud:
     gateway:
-      routes:
-        - id: product-service
-          uri: http://product-service:8081
-          predicates:
-            - Path=/api/products/**
+      server:
+        webmvc:
+          # Spring Cloud 2025.x uses spring-cloud-starter-gateway-server-webmvc (MVC/Tomcat).
+          # Its config prefix is spring.cloud.gateway.server.webmvc — NOT spring.cloud.gateway.
+          routes:
+            - id: product-service
+              uri: http://product-service:8081
+              predicates:
+                - Path=/api/products/**
 
-        - id: order-service
-          uri: http://order-service:8082
-          predicates:
-            - Path=/api/orders/**
+            - id: order-service
+              uri: http://order-service:8082
+              predicates:
+                - Path=/api/orders/**
 
-        - id: inventory-service
-          uri: http://inventory-service:8083
-          predicates:
-            - Path=/api/inventory/**
+            - id: inventory-service
+              uri: http://inventory-service:8083
+              predicates:
+                - Path=/api/inventory/**
 
 eureka:
   client:
@@ -231,8 +235,9 @@ metadata:
   namespace: shopnow
   labels:
     part-of: shopnow
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+  # No rewrite-target annotation here. The api-gateway owns the full path
+  # (/api/products/**, etc.) and must receive it unchanged to route correctly.
+  # rewrite-target: / would strip the path, causing 404s in the gateway.
 spec:
   ingressClassName: nginx
   rules:
