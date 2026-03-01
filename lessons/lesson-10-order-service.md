@@ -1,6 +1,6 @@
 # Lesson 10 — Namespaces & Resource Limits: Order Service
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** ResourceQuota, LimitRange, resource requests/limits (deep dive)
 **Spring Boot Concepts:** Spring Data JPA, REST, OpenFeign (inter-service calls)
 
