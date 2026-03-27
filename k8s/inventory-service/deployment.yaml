@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  namespace: shopnow
+  labels:
+    app: inventory-service
+    part-of: shopnow
+    version: "1.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-service
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+        part-of: shopnow
+        version: "1.0"
+    spec:
+      containers:
+        - name: inventory-service
+          image: shopnow/inventory-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8083
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: POSTGRES_DB
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8083
+            failureThreshold: 30    # 30 × 10s = 5 min max startup time
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8083
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8083
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"

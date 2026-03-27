@@ -1,0 +1,16 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: inventory-service-pdb
+  namespace: shopnow
+  labels:
+    app: inventory-service
+    part-of: shopnow
+spec:
+  # At least 1 replica must be available during voluntary disruptions
+  # (node drains, rolling updates). With replicas: 1, this means eviction
+  # is refused until a second replica is running.
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: inventory-service
