@@ -1,6 +1,6 @@
 # Lesson 11 — Circuit Breaker & Resilience: Inventory Service
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** Liveness/Readiness Probes (deep-dive), PodDisruptionBudget
 **Spring Boot Concepts:** Resilience4j circuit breaker, circuit breaker → readiness probe integration
 
@@ -147,7 +147,9 @@ order-service makes 5 consecutive failed Feign calls
          ▼
 Circuit breaker OPENS in order-service
          │
-         ▼  (because register-health-indicator: true)
+         ▼  (register-health-indicator: true → health indicator reports DOWN)
+         │  (group.readiness.include: readinessState,circuitBreakers → CB state is IN the readiness group)
+         ▼
 /actuator/health/readiness returns {"status":"DOWN"}
          │
          ▼
@@ -161,11 +163,19 @@ order-service pod removed from Service endpoints → no new traffic routed to it
 Circuit moves to HALF_OPEN → probe call succeeds → circuit CLOSES
          │
          ▼
+circuitBreakers health indicator reports UP → readiness group passes
+         │
+         ▼
 /actuator/health/readiness returns {"status":"UP"}
          │
          ▼
 K8s readiness probe passes → pod re-added to Service endpoints → traffic resumes
 ```
+
+> **Spring Boot 3 requires the explicit readiness group config.** Without `group.readiness.include`,
+> the circuit breaker health indicator only appears in the aggregate `/actuator/health` — it is
+> invisible to `/actuator/health/readiness`, so the K8s readiness probe never trips.
+> This is the single most common reason the CB → K8s integration silently fails.
 
 This is automatic, zero-downtime recovery. Once the wiring is in place you get it for free.
 
@@ -344,12 +354,6 @@ curl "http://localhost:8083/api/inventory?skuCodes=SKU-1,SKU-2"
     <groupId>org.springframework.cloud</groupId>
     <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
 </dependency>
-
-<!-- AOP — required for @CircuitBreaker annotation to work -->
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-aop</artifactId>
-</dependency>
 ```
 
 #### 6b. Add CB config to `order-service.yaml` in your config repo
@@ -369,10 +373,29 @@ resilience4j:
         register-health-indicator: true
 
 management:
+  endpoint:
+    health:
+      show-details: always
+      group:
+        readiness:
+          include: readinessState,circuitBreakers   # ← wire CB state into the readiness group
+  endpoints:
+    web:
+      exposure:
+        include: health,circuitbreakers,circuitbreakerevents
   health:
     circuitbreakers:
       enabled: true
 ```
+
+> **Spring Boot 3 gotcha:** In Spring Boot 3, liveness and readiness are **separate health groups**
+> (`/actuator/health/liveness` and `/actuator/health/readiness`). The `circuitBreakers` health
+> indicator exists but is NOT included in either group by default — it only appears in the
+> aggregate `/actuator/health`. Without the `group.readiness.include` line above, an open circuit
+> breaker will never flip the readiness probe to DOWN, and K8s will keep routing traffic to the
+> pod even though every inventory call is being short-circuited.
+> The `include` list is additive: `readinessState` is the default readiness check; you're
+> adding `circuitBreakers` alongside it.
 
 #### 6c. Implement the inventory check in order-service
 
@@ -445,20 +468,44 @@ The first 5 calls will hang briefly then return 503 (Feign timeout → circuit r
 Calls 6 and 7 should return 503 immediately — that's the circuit short-circuiting, no network
 call made.
 
-After the circuit opens, check order-service health:
+After the circuit opens, check order-service circuit breaker state:
 
 ```bash
 kubectl port-forward svc/order-service 8082:8082 -n shopnow
+
+# 1. Dedicated circuit breaker endpoint — most reliable in modern Resilience4j
+curl -s http://localhost:8082/actuator/circuitbreakers | jq .
+# Look for: .circuitBreakers[].circuitBreakerState = "OPEN"
+
+# 2. Recent CB events (calls, failures, state transitions)
+curl -s http://localhost:8082/actuator/circuitbreakerevents | jq '.circuitBreakerEvents[-5:]'
+
+# 3. Readiness probe — should now be DOWN because CB is in the readiness group
+curl -s http://localhost:8082/actuator/health/readiness | jq .
+# Expected: { "status": "DOWN" }
+
+# 4. Full health with details
 curl -s http://localhost:8082/actuator/health | jq .
-# Look for: "circuitBreakers" > "inventoryService" > "status": "CIRCUIT_OPEN"
 ```
+
+> **Why `/actuator/health` alone is misleading in Spring Boot 3:** The aggregate
+> `/actuator/health` endpoint may still show `"status": "UP"` depending on how health groups
+> are configured, even when the readiness group is DOWN. Always use the group-specific endpoints
+> (`/actuator/health/readiness`, `/actuator/health/liveness`) to check what K8s actually sees.
+> Use `/actuator/circuitbreakers` as the authoritative source for CB state.
 
 Restore inventory-service and watch the circuit self-heal:
 
 ```bash
 kubectl scale deployment inventory-service --replicas=1 -n shopnow
 # Wait ~30s for HALF_OPEN, then one successful call closes the circuit
-watch -n 3 'curl -s http://localhost:8082/actuator/health | jq ".components.circuitBreakers"'
+
+# Watch CB state change: OPEN → HALF_OPEN → CLOSED
+watch -n 3 'curl -s http://localhost:8082/actuator/circuitbreakers | jq ".circuitBreakers[0] | {state: .circuitBreakerState, failureRate: .failureRateThreshold}"'
+
+# Once CLOSED, readiness should recover:
+curl -s http://localhost:8082/actuator/health/readiness | jq .
+# Expected: { "status": "UP" }
 ```
 
 ---
