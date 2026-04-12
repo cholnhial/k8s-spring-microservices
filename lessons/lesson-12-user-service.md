@@ -524,6 +524,117 @@ cat /var/run/secrets/kubernetes.io/serviceaccount/token
 # "kubernetes.io/serviceaccount/service-account.name": "user-service"
 ```
 
+### 9. Wire the gateway to enforce JWT authentication
+
+Right now the gateway routes all requests blindly. This step adds a servlet `Filter` to
+api-gateway that validates the JWT locally using the shared `JWT_SECRET` — no call to
+user-service needed, no extra network hop.
+
+#### Why local verification (not calling `/validate`)?
+
+The JWT is signed with HMAC-SHA256 using `JWT_SECRET`. Any service that has the secret
+can verify the signature and expiry in microseconds without making a network call.
+Calling user-service on every request would add latency and create a runtime dependency
+— if user-service is down, **every** request to every service fails.
+
+The trade-off: you cannot invalidate individual tokens before they expire (there is no
+centralized revocation check). For a 1-hour expiry window this is acceptable in most
+applications.
+
+#### How it works
+
+```
+Browser / curl
+  │  GET /api/products
+  │  Authorization: Bearer <token>
+  ▼
+api-gateway  ←── JwtGatewayFilter runs first (Order=1)
+  │  1. path starts with /api/users/auth/ or /actuator/ ?  → pass through (no token needed)
+  │  2. Authorization header present and starts with "Bearer "?  → no → 401
+  │  3. HMAC-SHA256 verify + expiry check using JWT_SECRET     → fail → 401
+  │  4. all checks pass                                         → forward to product-service
+  ▼
+product-service
+```
+
+#### 9a. Add JJWT to api-gateway's pom.xml
+
+The jjwt dependencies and the broken test starter have already been updated in
+`services/api-gateway/pom.xml` — no manual change needed.
+
+#### 9b. The filter
+
+`services/api-gateway/src/main/java/dev/chol/shopnow/api_gateway/filter/JwtGatewayFilter.java`
+has been scaffolded. Read through it — the key points:
+
+- `@Order(1)` — runs before any gateway routing
+- `PUBLIC_PATHS` — `/api/users/auth/` and `/actuator/` bypass auth
+- `isTokenValid()` — recreates the same `SecretKey` as user-service and calls
+  `Jwts.parser().verifyWith(key).build().parseSignedClaims(token)`;
+  any `JwtException` (bad signature, expired, malformed) returns false
+- `sendUnauthorized()` — writes a JSON `{"error":"..."}` body with status 401
+
+> **The secret must match exactly.** The `JWT_SECRET` value in `jwt-secret` is the
+> same K8s Secret mounted into both user-service and api-gateway. If they differ,
+> the signature verification will always fail.
+
+#### 9c. Mount `jwt-secret` into the api-gateway Deployment
+
+`k8s/api-gateway/deployment.yaml` has been updated to add:
+
+```yaml
+env:
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: jwt-secret
+        key: JWT_SECRET
+```
+
+The `jwt-secret` Secret was already created in step 4 of this lesson. No new Secret needed.
+
+#### 9d. Rebuild and redeploy api-gateway
+
+```bash
+eval $(minikube docker-env)
+cd services/api-gateway
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/api-gateway:latest
+cd ../..
+
+kubectl apply -f k8s/api-gateway/deployment.yaml
+kubectl rollout status deployment/api-gateway -n shopnow --timeout=120s
+```
+
+#### 9e. Test enforcement
+
+```bash
+kubectl port-forward svc/api-gateway 8080:8080 -n shopnow
+
+# Without a token — should now return 401
+curl -s http://localhost:8080/api/products
+# Expected: {"error":"Missing or invalid Authorization header"}
+
+# Login to get a token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/users/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"secret"}' | jq -r '.token')
+
+# With a valid token — should return product list
+curl -s http://localhost:8080/api/products \
+  -H "Authorization: Bearer $TOKEN"
+
+# With a tampered token — should return 401
+curl -s http://localhost:8080/api/products \
+  -H "Authorization: Bearer ${TOKEN}tampered"
+# Expected: {"error":"Token is invalid or expired"}
+
+# Auth endpoints still public (no token required)
+curl -s -X POST http://localhost:8080/api/users/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"secret"}'
+# Expected: {"token":"..."}
+```
+
 ---
 
 ## Notes & Learnings
