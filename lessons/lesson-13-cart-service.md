@@ -1,6 +1,6 @@
 # Lesson 13 — Redis StatefulSet: Cart Service
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** StatefulSet (Redis), Headless Service, stable pod DNS
 **Spring Boot Concepts:** Spring Data Redis, Hash operations, cache-aside pattern
 
@@ -438,7 +438,17 @@ TTL cart:user-42     # -1 = no expiry set
 
 ## Notes & Learnings
 
-> _Record anything surprising, problems you hit, or insights you had._
+- Repo scaffolding added:
+  - `k8s/infrastructure/redis.yaml`
+  - `k8s/infrastructure/redis-svc.yaml`
+  - `k8s/cart-service/deployment.yaml`
+  - `k8s/cart-service/service.yaml`
+  - `services/cart-service` Redis config, controller, DTO, and service classes
+- The cart implementation stores one Redis Hash per user using the key pattern `cart:{userId}`.
+- Operational follow-up remains outside this repo:
+  - add `cart-service.yaml` and the `/api/cart/**` route in the external config repo
+  - build the `shopnow/cart-service:latest` image
+  - apply the manifests and verify rollout in the cluster
 
 ---
 
