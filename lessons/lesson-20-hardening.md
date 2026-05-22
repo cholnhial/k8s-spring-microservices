@@ -28,6 +28,25 @@ lessons.
 
 ---
 
+## Current Project Alignment
+
+This lesson assumes the platform has reached the current shape from Lessons 1-19:
+
+- Browser traffic enters through Ingress, hits `frontend` nginx on port 80, then nginx
+  proxies `/api/*` to `api-gateway:8080`.
+- `api-gateway` is no longer the direct public entry point from Ingress. It should accept
+  in-cluster traffic from `frontend`.
+- Product, order, inventory, user, cart, and notification services are deployed.
+- Redis, Kafka, ZooKeeper, and the PostgreSQL StatefulSets are running in `shopnow`.
+- Zipkin is added in Lesson 16 if you completed tracing.
+- The gateway currently allows unauthenticated access only to `/api/users/auth/*` and
+  `/actuator/*`; product, order, inventory, and cart API calls need a JWT.
+
+The NetworkPolicies below reflect that real topology. If you are testing a partially built
+cluster, apply only the policies for components you have actually deployed.
+
+---
+
 ## Concept: NetworkPolicy
 
 A **NetworkPolicy** is a firewall rule for pods. It controls ingress (incoming traffic) and
@@ -63,7 +82,9 @@ that pod switches from "allow all" to "deny all except what the policy permits".
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The principle: **each service should only reach the services it actually calls.**
+The principle: **each service should only reach the services it actually calls.** For the
+current frontend flow, that means `frontend` reaches `api-gateway`, and `api-gateway`
+reaches the backend HTTP services.
 
 ### NetworkPolicy anatomy
 
@@ -354,8 +375,36 @@ kubectl apply -f k8s/namespaces/default-deny-ingress.yaml
 
 Create the following files. Each policy allows only the specific ingress that service needs.
 
-**`k8s/api-gateway/networkpolicy.yaml`** — allow traffic from Ingress controller and
-external port-forwards:
+**`k8s/frontend/networkpolicy.yaml`** — allow browser traffic from the Ingress path to
+reach nginx:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-frontend
+  namespace: shopnow
+  labels:
+    app: frontend
+    part-of: shopnow
+    version: "1.0"
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 80
+          protocol: TCP
+```
+
+> There is no `from` selector here because the nginx Ingress Controller usually runs in
+> another namespace and may not share your app labels. The public boundary is still the
+> Ingress rule and nginx frontend; backend services remain locked down below.
+
+**`k8s/api-gateway/networkpolicy.yaml`** — allow traffic from the frontend nginx proxy:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -366,6 +415,7 @@ metadata:
   labels:
     app: api-gateway
     part-of: shopnow
+    version: "1.0"
 spec:
   podSelector:
     matchLabels:
@@ -373,11 +423,18 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    - ports:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
         - port: 8080
           protocol: TCP
-      # No 'from' restriction — the gateway is the public entry point
 ```
+
+> After this policy is applied, direct `kubectl port-forward svc/api-gateway ...` testing
+> may be blocked by NetworkPolicy enforcement. Test through `shopnow.local` and the frontend
+> path, or add a temporary debug-only allow policy while you investigate.
 
 **`k8s/product-service/networkpolicy.yaml`** — only api-gateway and order-service can
 reach it:
@@ -643,26 +700,187 @@ spec:
           protocol: TCP
 ```
 
+**`k8s/cart-service/networkpolicy.yaml`** — only api-gateway can reach cart-service:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-cart
+  namespace: shopnow
+  labels:
+    app: cart-service
+    part-of: shopnow
+    version: "1.0"
+spec:
+  podSelector:
+    matchLabels:
+      app: cart-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - port: 8085
+          protocol: TCP
+```
+
+**`k8s/notification-service/networkpolicy.yaml`** — notification-service currently
+consumes Kafka events and does not need inbound HTTP traffic from other services:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-ingress-to-notification
+  namespace: shopnow
+  labels:
+    app: notification-service
+    part-of: shopnow
+    version: "1.0"
+spec:
+  podSelector:
+    matchLabels:
+      app: notification-service
+  policyTypes:
+    - Ingress
+```
+
+**`k8s/infrastructure/networkpolicy-redis-kafka-zipkin.yaml`** — allow only the services
+that actually use Redis, Kafka, ZooKeeper, and Zipkin:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cart-to-redis
+  namespace: shopnow
+  labels:
+    app: redis
+    part-of: shopnow
+    version: "1.0"
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: cart-service
+      ports:
+        - port: 6379
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apps-to-kafka
+  namespace: shopnow
+  labels:
+    app: kafka
+    part-of: shopnow
+    version: "1.0"
+spec:
+  podSelector:
+    matchLabels:
+      app: kafka
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: order-service
+        - podSelector:
+            matchLabels:
+              app: notification-service
+      ports:
+        - port: 9092
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kafka-to-zookeeper
+  namespace: shopnow
+  labels:
+    app: zookeeper
+    part-of: shopnow
+    version: "1.0"
+spec:
+  podSelector:
+    matchLabels:
+      app: zookeeper
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - port: 2181
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-shopnow-to-zipkin
+  namespace: shopnow
+  labels:
+    app: zipkin
+    part-of: shopnow
+    version: "1.0"
+spec:
+  podSelector:
+    matchLabels:
+      app: zipkin
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              part-of: shopnow
+      ports:
+        - port: 9411
+          protocol: TCP
+```
+
 ### 3. Apply all NetworkPolicies and verify
 
 ```bash
 # Apply all at once
 kubectl apply -f k8s/namespaces/default-deny-ingress.yaml
+kubectl apply -f k8s/frontend/networkpolicy.yaml
 kubectl apply -f k8s/api-gateway/networkpolicy.yaml
 kubectl apply -f k8s/product-service/networkpolicy.yaml
 kubectl apply -f k8s/order-service/networkpolicy.yaml
 kubectl apply -f k8s/inventory-service/networkpolicy.yaml
 kubectl apply -f k8s/user-service/networkpolicy.yaml
+kubectl apply -f k8s/cart-service/networkpolicy.yaml
+kubectl apply -f k8s/notification-service/networkpolicy.yaml
 kubectl apply -f k8s/infrastructure/networkpolicy-postgres.yaml
+kubectl apply -f k8s/infrastructure/networkpolicy-redis-kafka-zipkin.yaml
 kubectl apply -f k8s/discovery-server/networkpolicy.yaml
 kubectl apply -f k8s/config-server/networkpolicy.yaml
 
 # List all policies
 kubectl get networkpolicy -n shopnow
 
-# Verify services still work through the gateway
-kubectl port-forward svc/api-gateway 8080:8080 -n shopnow &
-curl -s http://localhost:8080/api/products | head -c 200
+# Verify services still work through the frontend -> gateway path.
+TOKEN=$(curl -s -X POST http://shopnow.local/api/users/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password"}' | jq -r .token)
+
+curl -s http://shopnow.local/api/products \
+  -H "Authorization: Bearer $TOKEN" | head -c 200
 ```
 
 ### 4. Test that blocked traffic is actually blocked
@@ -728,12 +946,18 @@ Apply this to **all** service Deployments:
 - `k8s/order-service/deployment.yaml`
 - `k8s/inventory-service/deployment.yaml`
 - `k8s/user-service/deployment.yaml`
+- `k8s/cart-service/deployment.yaml`
+- `k8s/notification-service/deployment.yaml`
 - `k8s/config-server/deployment.yaml`
 - `k8s/discovery-server/deployment.yaml`
+- `k8s/frontend/deployment.yaml`
 
 > **Do not add `readOnlyRootFilesystem` to postgres StatefulSets.** PostgreSQL writes
 > to its data directory — it needs a writable filesystem. The PVC handles data, but
 > postgres also writes to `/var/run/postgresql` and other paths.
+>
+> For the nginx frontend, `readOnlyRootFilesystem: true` may require writable `emptyDir`
+> mounts for nginx runtime paths such as `/var/cache/nginx`, `/var/run`, and `/tmp`.
 
 ### 6. Disable automountServiceAccountToken
 
@@ -747,7 +971,9 @@ spec:
 ```
 
 user-service keeps the default (`true`) because it has a Role that reads Secrets from
-the K8s API (Lesson 12).
+the K8s API (Lesson 12). The frontend, Kafka, ZooKeeper, Redis, Postgres, and Zipkin
+do not need Kubernetes API credentials either, so disable token mounting for them unless
+you later add a controller-style integration.
 
 ### 7. Redeploy and verify
 
@@ -758,8 +984,11 @@ kubectl apply -f k8s/product-service/deployment.yaml
 kubectl apply -f k8s/order-service/deployment.yaml
 kubectl apply -f k8s/inventory-service/deployment.yaml
 kubectl apply -f k8s/user-service/deployment.yaml
+kubectl apply -f k8s/cart-service/deployment.yaml
+kubectl apply -f k8s/notification-service/deployment.yaml
 kubectl apply -f k8s/config-server/deployment.yaml
 kubectl apply -f k8s/discovery-server/deployment.yaml
+kubectl apply -f k8s/frontend/deployment.yaml
 
 # Watch pods restart
 kubectl get pods -n shopnow -w
@@ -824,11 +1053,17 @@ kubectl get pods -n shopnow -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}
 # SA token not mounted (should show 'false' for most services)
 kubectl get pods -n shopnow -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.automountServiceAccountToken}{"\n"}{end}'
 
-# Actuator endpoints locked down
-kubectl port-forward svc/api-gateway 8080:8080 -n shopnow &
-curl -s http://localhost:8080/api/products | head -c 100    # should work
-curl -s http://localhost:8080/actuator/env                   # should 404 or 401
-curl -s http://localhost:8080/actuator/heapdump              # should 404 or 401
+# App path still works through Ingress -> frontend -> gateway.
+TOKEN=$(curl -s -X POST http://shopnow.local/api/users/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password"}' | jq -r .token)
+
+curl -s http://shopnow.local/api/products \
+  -H "Authorization: Bearer $TOKEN" | head -c 100
+
+# Actuator endpoints locked down.
+curl -s http://shopnow.local/actuator/env        # should 404 or 401
+curl -s http://shopnow.local/actuator/heapdump   # should 404 or 401
 ```
 
 ---

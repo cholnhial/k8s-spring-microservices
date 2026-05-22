@@ -6,6 +6,19 @@
 
 ---
 
+## Current Project Alignment
+
+The platform now has two useful rollout surfaces:
+
+- Spring Boot Deployments such as `order-service`, where graceful shutdown matters.
+- The Angular/nginx `frontend`, where ConfigMap changes often need `kubectl rollout restart`
+  even when the image does not change.
+
+Kafka and ZooKeeper are StatefulSets. Do not use the Deployment rollout examples on them;
+StatefulSets roll one ordinal at a time and have different operational rules.
+
+---
+
 ## Concept: What Actually Happens on `kubectl apply`
 
 Every time you change a Deployment's pod template and re-apply it, K8s creates a **new
@@ -176,6 +189,12 @@ trail.
 ```yaml
 image: shopnow/order-service:v1.2.3
 imagePullPolicy: IfNotPresent
+```
+
+Use the same rule for the frontend:
+
+```yaml
+image: shopnow/frontend:v1.2.3
 ```
 
 ---
@@ -361,6 +380,9 @@ spring:
 
 Commit and push.
 
+Also apply this shared config to `cart-service` and `notification-service`; they were
+added after the first core-service lessons.
+
 ### 2. Update order-service Deployment with preStop and grace period
 
 Edit `k8s/order-service/deployment.yaml`. Add to the pod spec:
@@ -505,6 +527,20 @@ Apply and confirm a clean state:
 kubectl apply -f k8s/order-service/deployment.yaml
 kubectl rollout status deployment/order-service -n shopnow
 ```
+
+### 5b. Roll out a frontend ConfigMap-only change
+
+Frontend nginx config is mounted from `k8s/frontend/nginx-configmap.yaml`. Changing that
+ConfigMap does not automatically restart the frontend pod:
+
+```bash
+kubectl apply -f k8s/frontend/nginx-configmap.yaml
+kubectl rollout restart deployment/frontend -n shopnow
+kubectl rollout status deployment/frontend -n shopnow
+```
+
+This is the same reason we use `rollout restart` after external Config Server changes:
+the pod template did not change, but the mounted/configured runtime behavior did.
 
 ### 6. Blue/green for product-service
 

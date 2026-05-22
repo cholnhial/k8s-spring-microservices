@@ -6,6 +6,22 @@
 
 ---
 
+## Current Project Alignment
+
+Lesson 16 starts from the platform as it exists after Lesson 15:
+
+- Browser traffic enters through `shopnow.local` Ingress, then reaches `frontend`.
+- The frontend nginx ConfigMap proxies `/api/*` to `api-gateway:8080`.
+- `api-gateway` validates JWTs for all non-public API paths.
+- `order-service` now publishes `order-created` Kafka events.
+- `notification-service` consumes those events from Kafka.
+- Kafka and ZooKeeper use `bitnamilegacy/kafka:3.7` and `bitnamilegacy/zookeeper:3.9`.
+
+Tracing should cover synchronous HTTP calls first. Kafka producer/consumer tracing is
+a useful extension after the basic Zipkin HTTP waterfall is visible.
+
+---
+
 ## Concept: The Sidecar Pattern
 
 A **sidecar** is a second container that runs in the same pod as your main application
@@ -146,7 +162,8 @@ management:
       endpoint: http://zipkin:9411/api/v2/spans
 ```
 
-Spring Boot auto-configures everything else. No code changes needed in the services.
+Spring Boot auto-configures HTTP tracing once those dependencies and config are present.
+No controller code changes are needed.
 
 ---
 
@@ -237,6 +254,10 @@ For each of these services, add the two dependencies to `pom.xml`:
 - `order-service`
 - `inventory-service`
 - `user-service`
+- `cart-service`
+- `notification-service`
+- `config-server`
+- `discovery-server`
 
 ```xml
 <dependency>
@@ -268,7 +289,7 @@ Commit and push the config repo, then rebuild and redeploy each service:
 ```bash
 eval $(minikube docker-env)
 
-for svc in api-gateway product-service order-service inventory-service user-service; do
+for svc in api-gateway product-service order-service inventory-service user-service cart-service notification-service config-server discovery-server; do
   echo "Building $svc..."
   cd services/$svc
   ./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/$svc:latest -q
@@ -292,15 +313,21 @@ At this point you will see nothing — Zipkin only shows traces after requests a
 ### 5. Generate some traces
 
 ```bash
-kubectl port-forward svc/api-gateway 8080:8080 -n shopnow
+# Use the same path the browser uses: Ingress -> frontend nginx -> api-gateway.
+# Login first because api-gateway currently protects product/order/cart APIs.
+TOKEN=$(curl -s -X POST http://shopnow.local/api/users/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password"}' | jq -r .token)
 
-# A simple product list — one span per service involved
-curl -s http://localhost:8080/api/products
+# A simple product list — api-gateway -> product-service
+curl -s http://shopnow.local/api/products \
+  -H "Authorization: Bearer $TOKEN"
 
 # An order — api-gateway → order-service → inventory-service (via circuit breaker) + Kafka publish
-curl -s -X POST http://localhost:8080/api/orders \
+curl -s -X POST http://shopnow.local/api/orders \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"orderLineItems":[{"skuCode":"SKU-1","price":29.99,"quantity":1}]}'
+  -d '{"orderLineItems":[{"productId":1,"quantity":1}]}'
 ```
 
 ### 6. Explore traces in the Zipkin UI
@@ -315,6 +342,10 @@ Look specifically for the order creation trace — it should show:
 ```
 api-gateway  →  order-service  →  inventory-service
 ```
+
+The order request also publishes to Kafka. In the basic Micrometer HTTP setup, that
+Kafka boundary may not appear as a single connected waterfall unless Kafka tracing
+instrumentation is also enabled.
 
 ### 7. Demonstrate the sidecar pattern with a log-shipping sidecar
 
@@ -373,6 +404,9 @@ kubectl logs deployment/product-service -n shopnow -c log-shipper
 
 > **Key observation:** `-c <container-name>` is required when a pod has multiple containers.
 > Without it, kubectl defaults to the first container.
+
+Do **not** add this sidecar to the frontend nginx pod. The frontend is already a small
+nginx-only static serving pod, and nginx logs to stdout by default.
 
 To remove the sidecar after the exercise, revert the Deployment YAML to single-container
 and re-apply.

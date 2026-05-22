@@ -8,7 +8,8 @@
 
 ## Concept: Why Helm?
 
-By the end of Lesson 18 you have roughly 40 YAML files across `k8s/`. Deploying
+By the end of Lesson 18 you have raw YAML for Spring services, frontend, databases,
+Redis, Kafka/ZooKeeper, Zipkin, Ingress, RBAC, and namespace controls. Deploying
 ShopNow from scratch means `kubectl apply -f` on every directory in the right order,
 keeping track of Secrets that must be created imperatively, and editing manifests
 by hand when an environment differs.
@@ -58,7 +59,11 @@ shopnow/                      ← chart root (name must match Chart.yaml)
 │   ├── configmap-config-url.yaml
 │   ├── api-gateway/
 │   │   ├── deployment.yaml
+│   │   └── service.yaml
+│   ├── frontend/
+│   │   ├── deployment.yaml
 │   │   ├── service.yaml
+│   │   ├── nginx-configmap.yaml
 │   │   └── ingress.yaml
 │   ├── order-service/
 │   │   ├── deployment.yaml
@@ -318,10 +323,17 @@ Cons:
 - In our course, we've been learning *the primitives* — wholesale vendoring
   short-circuits that.
 
-> For this lesson we'll **convert the services we built** (Spring Boot apps) into a
-> Helm chart, but **keep the infrastructure** (postgres, redis, kafka) as raw manifests
-> you wrote in earlier lessons. A future exercise is to replace each with a Bitnami
-> subchart.
+> For this lesson we'll **convert the services we built** (Spring Boot apps plus
+> frontend) into a Helm chart, but **keep the infrastructure** (postgres, redis,
+> Kafka/ZooKeeper, Zipkin) as raw manifests you wrote in earlier lessons. A future
+> exercise is to replace each with maintained subcharts.
+
+### Bitnami image/chart caveat
+
+Our raw Kafka/ZooKeeper manifests use `bitnamilegacy/...` images because the old
+`bitnami/kafka:3.7` and `bitnami/zookeeper:3.9` image tags are no longer pullable from
+Docker Hub. If you later move Kafka/ZooKeeper to subcharts, verify the current chart
+repository and image registry before templating them.
 
 ---
 
@@ -431,7 +443,6 @@ apiGateway:
   image:
     repository: shopnow/api-gateway
     tag: "1.0.0"
-  ingressHost: shopnow.local
 
 # ── Business services (pattern: one block per service) ──
 orderService:
@@ -497,6 +508,22 @@ notificationService:
   image:
     repository: shopnow/notification-service
     tag: "1.0.0"
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: 500m, memory: 768Mi }
+  env:
+    BPL_JVM_THREAD_COUNT: "50"
+
+frontend:
+  enabled: true
+  replicas: 1
+  image:
+    repository: shopnow/frontend
+    tag: "1.0.0"
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 100m, memory: 128Mi }
+  ingressHost: shopnow.local
 ```
 
 ### 5. Write `_helpers.tpl`
@@ -646,7 +673,9 @@ spec:
 ```
 
 Replicate this pattern for all services you've built (api-gateway, product, order,
-inventory, user, cart, notification, config-server, discovery-server).
+inventory, user, cart, notification, config-server, discovery-server, and frontend).
+The frontend also needs templates for its nginx ConfigMap and Ingress because
+`shopnow.local` now routes to `frontend:80`, not directly to api-gateway.
 
 ### 8. Template the HPAs
 
@@ -686,6 +715,9 @@ Replace `templates/NOTES.txt` with:
 ShopNow v{{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
 
 Services enabled:
+{{- if .Values.frontend.enabled }}
+  - frontend (replicas: {{ .Values.frontend.replicas }})
+{{- end }}
 {{- if .Values.orderService.enabled }}
   - order-service (replicas: {{ .Values.orderService.replicas }})
 {{- end }}
@@ -700,8 +732,8 @@ Check status:
   kubectl get pods -n {{ .Values.global.namespace }}
   helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-Port-forward the gateway:
-  kubectl port-forward svc/api-gateway 8080:8080 -n {{ .Values.global.namespace }}
+Open the app:
+  http://{{ .Values.frontend.ingressHost }}
 ```
 
 ### 10. Render locally and inspect

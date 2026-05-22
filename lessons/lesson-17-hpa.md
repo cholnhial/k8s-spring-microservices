@@ -6,6 +6,28 @@
 
 ---
 
+## Current Project Alignment
+
+After Lesson 15, ShopNow has more running pods than the original HPA lesson assumed:
+
+- Spring services: config-server, discovery-server, api-gateway, product-service,
+  order-service, inventory-service, user-service, cart-service, notification-service
+- Frontend nginx
+- Infrastructure: four PostgreSQL StatefulSets, Redis, Kafka, ZooKeeper
+
+Your namespace quota is currently `requests.cpu: 4` and `requests.memory: 8Gi`.
+Before applying HPAs with `minReplicas: 2`, check actual requested resources:
+
+```bash
+kubectl describe resourcequota shopnow-quota -n shopnow
+kubectl top pods -n shopnow
+```
+
+If new HPA replicas stay `Pending`, the likely cause is quota pressure rather than HPA
+logic. Either raise the quota for the lesson or lower HPA `maxReplicas` temporarily.
+
+---
+
 ## Concept: Why Autoscale?
 
 So far every Deployment in ShopNow runs `replicas: 1`. That means:
@@ -355,10 +377,10 @@ spec:
           periodSeconds: 60
 ```
 
-> **Why two services?** order-service gets both CPU and memory metrics (it's the most
-> complex service, doing Feign calls + JPA writes). product-service gets CPU only (it's
-> read-heavy and a good contrast). This lets you compare how HPA behaves with different
-> metric configurations.
+> **Why these two services?** order-service gets both CPU and memory metrics because it
+> does Feign calls, JPA writes, and Kafka publishing. product-service gets CPU only
+> because it is read-heavy and a good contrast. Frontend can also be autoscaled later,
+> but it uses tiny nginx pods and is not a useful JVM scaling example.
 
 ### 3. Apply and observe
 
@@ -403,17 +425,21 @@ Open a terminal to watch HPA status live:
 watch -n 5 'kubectl get hpa -n shopnow'
 ```
 
-In another terminal, generate sustained load against order-service:
+In another terminal, generate sustained load against order-service through the same
+Ingress -> frontend -> gateway path the browser uses:
 
 ```bash
-# Port-forward the api-gateway
-kubectl port-forward svc/api-gateway 8080:8080 -n shopnow &
+# Login first; api-gateway protects order-service.
+TOKEN=$(curl -s -X POST http://shopnow.local/api/users/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password"}' | jq -r .token)
 
-# Sustained load — hit the orders endpoint 10 requests/second for 2 minutes
-# (adjust the product ID to one that exists in your DB)
+# Sustained load — hit the orders endpoint 10 requests/second for 2 minutes.
+# Adjust the product ID to one that exists in your DB.
 for i in $(seq 1 1200); do
   curl -s -o /dev/null -w "%{http_code}\n" \
-    -X POST http://localhost:8080/api/orders \
+    -X POST http://shopnow.local/api/orders \
+    -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"orderLineItems":[{"productId":1,"quantity":1}]}' &
   sleep 0.1
@@ -431,8 +457,9 @@ What to observe:
 
 ### 6. Verify the ResourceQuota interaction
 
-With `minReplicas: 2` on both order-service and product-service, you now have at least 4
-Spring Boot pods. Each requests 512Mi memory and 250m CPU.
+With `minReplicas: 2` on both order-service and product-service, you add at least 2
+extra Spring Boot pods beyond the already-running platform. Product/order each request
+512Mi memory and 250m CPU in the current manifests.
 
 ```bash
 kubectl describe resourcequota shopnow-quota -n shopnow
