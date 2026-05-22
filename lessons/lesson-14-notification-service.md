@@ -1,6 +1,6 @@
 # Lesson 14 — Kafka StatefulSet & Headless Services: Notification Service
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** StatefulSet (ZooKeeper + Kafka), Headless Service, broker DNS
 **Spring Boot Concepts:** Spring Kafka, producer, consumer, event-driven pub/sub
 
@@ -156,7 +156,7 @@ spec:
     spec:
       containers:
         - name: zookeeper
-          image: bitnami/zookeeper:3.9
+          image: bitnamilegacy/zookeeper:3.9
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 2181
@@ -231,7 +231,7 @@ spec:
     spec:
       containers:
         - name: kafka
-          image: bitnami/kafka:3.7
+          image: bitnamilegacy/kafka:3.7
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9092
@@ -480,6 +480,9 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 8086
+          env:
+            - name: BPL_JVM_THREAD_COUNT
+              value: "50"
           startupProbe:
             httpGet:
               path: /actuator/health
@@ -500,10 +503,10 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "250m"
             limits:
-              memory: "512Mi"
+              memory: "768Mi"
               cpu: "500m"
 ```
 
@@ -582,6 +585,15 @@ kubectl exec -it kafka-0 -n shopnow -- kafka-consumer-groups.sh \
 ## Notes & Learnings
 
 > _Record anything surprising, problems you hit, or insights you had._
+
+- Implemented Kafka and ZooKeeper as single-replica StatefulSets for Minikube.
+- Kafka uses a headless Service so the broker can advertise the stable DNS name
+  `kafka-0.kafka.shopnow.svc.cluster.local`.
+- The producer disables JSON type headers and the consumer uses its own default event type.
+  This keeps notification-service from needing order-service's Java package on its classpath.
+- The notification-service container uses `768Mi` memory and `BPL_JVM_THREAD_COUNT=50`.
+  Paketo's memory calculator assumes 250 JVM threads by default, which can exceed a small
+  `512Mi` container limit before the app starts.
 
 ---
 

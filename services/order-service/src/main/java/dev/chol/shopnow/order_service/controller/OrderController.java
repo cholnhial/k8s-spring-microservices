@@ -8,6 +8,7 @@ import dev.chol.shopnow.order_service.model.Order;
 import dev.chol.shopnow.order_service.model.OrderLineItem;
 import dev.chol.shopnow.order_service.repository.OrderRepository;
 import dev.chol.shopnow.order_service.service.InventoryCheckService;
+import dev.chol.shopnow.order_service.service.OrderEventPublisher;
 import feign.FeignException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -22,12 +23,15 @@ public class OrderController {
     private final OrderRepository orderRepository;
     private final ProductClient productClient;
     private final InventoryCheckService inventoryCheckService;
+    private final OrderEventPublisher orderEventPublisher;
 
     public OrderController(OrderRepository orderRepository, ProductClient productClient,
-                           InventoryCheckService inventoryCheckService) {
+                           InventoryCheckService inventoryCheckService,
+                           OrderEventPublisher orderEventPublisher) {
         this.orderRepository = orderRepository;
         this.productClient = productClient;
         this.inventoryCheckService = inventoryCheckService;
+        this.orderEventPublisher = orderEventPublisher;
     }
 
     @GetMapping
@@ -74,6 +78,8 @@ public class OrderController {
 
         Order order = new Order();
         order.setOrderLineItems(lineItems);
-        return orderRepository.save(order);
+        Order savedOrder = orderRepository.save(order);
+        orderEventPublisher.publishOrderPlaced(savedOrder);
+        return savedOrder;
     }
 }

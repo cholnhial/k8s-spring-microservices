@@ -105,7 +105,7 @@ Tick a box by changing `[ ]` to `[x]`.
 ### Phase 4 — Stateful & Event-Driven Services
 
 - [x] **Lesson 13** — [Redis StatefulSet: Cart Service](lessons/lesson-13-cart-service.md)
-- [ ] **Lesson 14** — [Kafka StatefulSet & Headless Services: Notification Service](lessons/lesson-14-notification-service.md)
+- [x] **Lesson 14** — [Kafka StatefulSet & Headless Services: Notification Service](lessons/lesson-14-notification-service.md)
 
 ### Phase 5 — Frontend & Observability
 
