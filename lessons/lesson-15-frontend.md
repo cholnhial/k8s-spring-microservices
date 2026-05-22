@@ -1,7 +1,7 @@
 # Lesson 15 — nginx + Angular: Frontend Deployment
 
-**Status:** [ ] Complete
-**K8s Concepts:** ConfigMap as volume, Deployment (stateless), Service (ClusterIP + NodePort)
+**Status:** [x] Complete
+**K8s Concepts:** ConfigMap as volume, Deployment (stateless), Service (ClusterIP), Ingress handoff to frontend
 **Spring Boot Concepts:** None — this lesson is Angular + nginx. You will wire auth into the
 front end using the JWT that user-service issues in Lesson 12.
 
@@ -44,6 +44,27 @@ kubectl rollout restart deployment/frontend -n shopnow
 
 ---
 
+## Current Backend Contract
+
+Lesson 15 builds on the backend that exists now:
+
+| Backend | Current contract |
+|---|---|
+| `api-gateway` | Validates JWTs for every path except `/api/users/auth/*` and `/actuator/*` |
+| `user-service` | `POST /api/users/auth/register`, `POST /api/users/auth/login`, `GET /api/users/auth/validate?token=...` |
+| `product-service` | `GET /api/products`, `GET /api/products/{id}` |
+| `inventory-service` | `GET /api/inventory?skuCodes=SKU-1&skuCodes=SKU-2` |
+| `cart-service` | Redis hash cart at `/api/cart/{userId}`; item payload is `{ "productId": "...", "quantity": 1 }` |
+| `order-service` | `POST /api/orders`; successful orders publish `order-created` to Kafka |
+| `notification-service` | Consumes `order-created`; no frontend route |
+
+That means the frontend is **login-first** for now. The product pages are visually
+public routes if you want them to be, but API calls to `/api/products` will still get
+`401` unless the browser sends a valid JWT. To make the catalog public later, update
+`JwtGatewayFilter.PUBLIC_PATHS` or move route-level auth policy into gateway config.
+
+---
+
 ## Concept: nginx as a Reverse Proxy
 
 nginx has two jobs in this setup:
@@ -65,8 +86,8 @@ nginx pod
   └── /api/            → http://api-gateway:8080/api/
 ```
 
-This eliminates CORS issues — from the browser's perspective, all requests go to the
-same origin (the nginx host).
+This eliminates CORS issues. From the browser's perspective, all requests go to the
+same origin: `http://shopnow.local`.
 
 ```nginx
 server {
@@ -124,8 +145,8 @@ This means you can update the proxy rules without rebuilding the image.
 
 ## Concept: SPA + Stateless JWT Auth
 
-ShopNow's backend issues a JWT from user-service (Lesson 12) and the api-gateway
-validates it on every call (`JwtGatewayFilter`). That makes the frontend's job simple:
+ShopNow's backend issues a JWT from user-service (Lesson 12), and the api-gateway
+validates it on every non-public call (`JwtGatewayFilter`). That makes the frontend's job simple:
 
 1. **Login** — POST credentials to `/api/users/auth/login`, receive `{token}`.
 2. **Store** — put the token in `localStorage` so page reloads keep the session.
@@ -152,8 +173,8 @@ validates it on every call (`JwtGatewayFilter`). That makes the frontend's job s
        │                                │                         (gateway filter validates)
 ```
 
-There is **no session cookie**, no server-side session state, no refresh token. The
-JWT expires after 1 hour and the user logs in again.
+There is **no session cookie**, no server-side session state, and no refresh token in
+the current backend. When the JWT expires, the user logs in again.
 
 ### Why `localStorage` and not `sessionStorage` or cookies?
 
@@ -218,11 +239,11 @@ You'll build a small but complete SPA with these routes:
 
 | Route | Access | Purpose |
 |---|---|---|
-| `/` | Public | Redirects to `/products` |
+| `/` | Public | Redirects to `/login` |
 | `/login` | Public | Username + password form |
 | `/register` | Public | New user signup |
-| `/products` | Public | Grid of products with "Add to Cart" |
-| `/products/:id` | Public | Single product detail + "Add to Cart" |
+| `/products` | Auth | Grid of products with "Add to Cart" |
+| `/products/:id` | Auth | Single product detail + "Add to Cart" |
 | `/cart` | Auth | Current user's cart, quantity edit, remove, "Checkout" |
 | `/checkout` | Auth | Confirm cart → POST to `/api/orders`, redirect to `/orders` |
 | `/orders` | Auth | List of the user's past orders |
@@ -231,9 +252,9 @@ You'll build a small but complete SPA with these routes:
 
 | Screen | Endpoint | Auth |
 |---|---|---|
-| Product list | `GET /api/products` | No |
-| Product detail | `GET /api/products/:id` | No |
-| In-stock badge | `GET /api/inventory?skuCodes=…` | No |
+| Product list | `GET /api/products` | Yes |
+| Product detail | `GET /api/products/:id` | Yes |
+| In-stock badge | `GET /api/inventory?skuCodes=SKU1&skuCodes=SKU2` | Yes |
 | Login | `POST /api/users/auth/login` | No |
 | Register | `POST /api/users/auth/register` | No |
 | Add to cart | `POST /api/cart/:userId/items` | Yes |
@@ -392,9 +413,9 @@ export interface InventoryResponse { skuCode: string; inStock: boolean; }
 `cart.ts`
 
 ```ts
-// cart-service returns a Redis hash: { "<productId>": "<quantity>", ... }
+// cart-service returns a Redis hash: { "<productId>": <quantity>, ... }
 export type Cart = Record<string, number>;
-export interface AddToCartRequest { productId: number; quantity: number; }
+export interface AddToCartRequest { productId: string; quantity: number; }
 ```
 
 `order.ts`
@@ -549,17 +570,18 @@ export class ProductService {
     return this.http.get<Product>(`/api/products/${id}`);
   }
 
-  // Combines product list with inventory so the UI can show in-stock badges
+  // Combines product list with inventory so the UI can show in-stock badges.
+  // Spring parses repeated query params into List<String>: ?skuCodes=A&skuCodes=B
   listWithStock(): Observable<Array<Product & { inStock: boolean }>> {
     return this.list().pipe(
-      // ... TODO: hit /api/inventory?skuCodes=… and merge inStock by skuCode
+      // ... TODO: hit /api/inventory?skuCodes=SKU1&skuCodes=SKU2 and merge by skuCode
     );
   }
 }
 ```
 
 > The `listWithStock` stub is where **you** wire the inventory call. Hint: collect
-> skuCodes from the product list, call `/api/inventory?skuCodes=SKU1,SKU2`, then map
+> skuCodes from the product list, call `/api/inventory?skuCodes=SKU1&skuCodes=SKU2`, then map
 > each product to `{...p, inStock}`.
 
 ### 10. Cart service — `features/cart/cart.service.ts`
@@ -718,6 +740,7 @@ pattern.
 
 ```ts
 import { Component, inject, OnInit, signal } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ProductService } from './product.service';
 import { CartService } from '../cart/cart.service';
@@ -727,7 +750,7 @@ import { Product } from '../../core/models/product';
 @Component({
   selector: 'app-product-list',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, CurrencyPipe],
   template: `
     <h2>Products</h2>
     <div class="grid">
@@ -753,7 +776,7 @@ export class ProductListComponent implements OnInit {
   ngOnInit() { this.productSvc.list().subscribe(ps => this.products.set(ps)); }
 
   addToCart(p: Product) {
-    this.cartSvc.add({ productId: p.id, quantity: 1 }).subscribe();
+    this.cartSvc.add({ productId: String(p.id), quantity: 1 }).subscribe();
   }
 }
 ```
@@ -834,11 +857,11 @@ import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'products' },
+  { path: '', pathMatch: 'full', redirectTo: 'login' },
   { path: 'login',    loadComponent: () => import('./features/auth/login.component').then(m => m.LoginComponent) },
   { path: 'register', loadComponent: () => import('./features/auth/register.component').then(m => m.RegisterComponent) },
-  { path: 'products', loadComponent: () => import('./features/products/product-list.component').then(m => m.ProductListComponent) },
-  { path: 'products/:id', loadComponent: () => import('./features/products/product-detail.component').then(m => m.ProductDetailComponent) },
+  { path: 'products', canActivate: [authGuard], loadComponent: () => import('./features/products/product-list.component').then(m => m.ProductListComponent) },
+  { path: 'products/:id', canActivate: [authGuard], loadComponent: () => import('./features/products/product-detail.component').then(m => m.ProductDetailComponent) },
   { path: 'cart',     canActivate: [authGuard], loadComponent: () => import('./features/cart/cart.component').then(m => m.CartComponent) },
   { path: 'checkout', canActivate: [authGuard], loadComponent: () => import('./features/checkout/checkout.component').then(m => m.CheckoutComponent) },
   { path: 'orders',   canActivate: [authGuard], loadComponent: () => import('./features/orders/orders.component').then(m => m.OrdersComponent) },
@@ -1081,57 +1104,96 @@ metadata:
     part-of: shopnow
     version: "1.0"
 spec:
-  type: NodePort
   selector:
     app: frontend
   ports:
     - port: 80
       targetPort: 80
-      nodePort: 30080
 ```
 
-> **NodePort** exposes the service on every Minikube node's port 30080. This lets you
-> open the app directly in the browser without `kubectl port-forward`. The Ingress
-> (from Lesson 09) is the production-grade way — NodePort is a shortcut for local dev.
+This is a normal ClusterIP Service. The browser reaches it through Ingress, and nginx
+inside the frontend pod proxies `/api/*` to `api-gateway:8080`.
 
-### 22. Deploy
+### 22. Update the Ingress to point at frontend
+
+Lesson 09 currently routes `shopnow.local/` directly to `api-gateway`. Now frontend
+becomes the browser entry point, so change `k8s/api-gateway/ingress.yaml` to point at
+the `frontend` Service:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopnow-ingress
+  namespace: shopnow
+  labels:
+    part-of: shopnow
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shopnow.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80
+```
+
+The API gateway still receives API traffic, but indirectly:
+
+```
+Browser -> Ingress -> frontend nginx -> api-gateway -> Spring services
+```
+
+### 23. Deploy
 
 ```bash
 kubectl apply -f k8s/frontend/nginx-configmap.yaml
 kubectl apply -f k8s/frontend/deployment.yaml
 kubectl apply -f k8s/frontend/service.yaml
+kubectl apply -f k8s/api-gateway/ingress.yaml
 
 kubectl rollout status deployment/frontend -n shopnow --timeout=60s
 ```
 
-### 23. Open the deployed app
+### 24. Open the deployed app
 
 ```bash
-minikube service frontend -n shopnow
-# Opens the NodePort URL in your default browser
+minikube tunnel
 ```
 
-Or manually:
+In another terminal:
 
 ```bash
-minikube ip                       # e.g. 192.168.49.2
-# Open http://192.168.49.2:30080
+curl -I http://shopnow.local/
 ```
 
-Go through the same end-to-end flow you tested with `ng serve`: register → log in →
+If `shopnow.local` does not resolve on your machine, add it to `/etc/hosts` using the
+Ingress address shown by:
+
+```bash
+kubectl get ingress shopnow-ingress -n shopnow
+```
+
+Go through the same end-to-end flow you tested with `ng serve`: register/login →
 browse → add to cart → checkout → view orders → log out. Everything should work
 identically, but now served by nginx out of the cluster with zero dev tooling in the
 browser environment.
 
-### 24. Test the nginx proxy directly
+### 25. Test the nginx proxy directly
 
 ```bash
-NODE_IP=$(minikube ip)
-curl -s http://$NODE_IP:30080/api/products | head -c 200
+TOKEN="paste-a-jwt-from-login-here"
+curl -s http://shopnow.local/api/products \
+  -H "Authorization: Bearer $TOKEN" | head -c 200
 # JSON via nginx → api-gateway → product-service
 ```
 
-### 25. Demonstrate ConfigMap live reload
+### 26. Demonstrate ConfigMap live reload
 
 Change the nginx config without rebuilding the image:
 
@@ -1141,7 +1203,7 @@ kubectl edit configmap nginx-frontend-config -n shopnow
 
 kubectl rollout restart deployment/frontend -n shopnow
 
-curl -sI http://$(minikube ip):30080/ | grep X-Served-By
+curl -sI http://shopnow.local/ | grep X-Served-By
 # Expected: X-Served-By: shopnow-frontend
 ```
 
@@ -1153,6 +1215,16 @@ don't need a new image build.
 ## Notes & Learnings
 
 > _Record anything surprising, problems you hit, or insights you had._
+
+- Angular CLI 17 was installed and the `frontend/` standalone Angular app was scaffolded.
+- The frontend implementation now matches the current backend contract: login-first routing,
+  JWT bearer headers, cart-service Redis hash payloads, order checkout, and nginx `/api/*`
+  proxying through `api-gateway`.
+- Kubernetes manifests were added under `k8s/frontend/`, and `shopnow.local` Ingress now
+  routes to the frontend Service. The frontend nginx ConfigMap proxies `/api/*` to
+  `api-gateway:8080`.
+- Verification completed: Angular production build passes, and the frontend manifests plus
+  updated Ingress pass `kubectl apply --dry-run=client --validate=false`.
 
 ---
 

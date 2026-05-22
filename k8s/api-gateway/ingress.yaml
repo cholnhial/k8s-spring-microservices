@@ -4,7 +4,9 @@ metadata:
   name: shopnow-ingress
   namespace: shopnow
   labels:
+    app: frontend
     part-of: shopnow
+    version: "1.0"
 spec:
   ingressClassName: nginx
   rules:
@@ -15,6 +17,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: api-gateway
+                name: frontend
                 port:
-                  number: 8080
+                  number: 80

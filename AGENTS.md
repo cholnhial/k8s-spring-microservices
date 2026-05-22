@@ -109,7 +109,7 @@ Tick a box by changing `[ ]` to `[x]`.
 
 ### Phase 5 — Frontend & Observability
 
-- [ ] **Lesson 15** — [nginx + Angular: Frontend Deployment](lessons/lesson-15-frontend.md)
+- [x] **Lesson 15** — [nginx + Angular: Frontend Deployment](lessons/lesson-15-frontend.md)
 - [ ] **Lesson 16** — [Sidecar Pattern: Distributed Tracing with Zipkin](lessons/lesson-16-tracing.md)
 
 ### Phase 6 — Production Readiness
