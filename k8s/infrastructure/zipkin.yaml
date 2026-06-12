@@ -1,58 +1,55 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api-gateway
+  name: zipkin
   namespace: shopnow
   labels:
-    app: api-gateway
+    app: zipkin
     part-of: shopnow
     version: "1.0"
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: api-gateway
+      app: zipkin
   template:
     metadata:
       labels:
-        app: api-gateway
+        app: zipkin
         part-of: shopnow
         version: "1.0"
     spec:
       containers:
-        - name: api-gateway
-          image: shopnow/api-gateway:latest
-          imagePullPolicy: Never
+        - name: zipkin
+          image: openzipkin/zipkin:3
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - containerPort: 9411
           env:
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: jwt-secret
-                  key: JWT_SECRET
+            - name: STORAGE_TYPE
+              value: mem
           startupProbe:
             httpGet:
-              path: /actuator/health
-              port: 8080
+              path: /health
+              port: 9411
             failureThreshold: 30
-            periodSeconds: 10
+            periodSeconds: 5
           livenessProbe:
             httpGet:
-              path: /actuator/health/liveness
-              port: 8080
+              path: /health
+              port: 9411
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /actuator/health/readiness
-              port: 8080
+              path: /health
+              port: 9411
             periodSeconds: 5
             failureThreshold: 3
           resources:
             requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
               memory: "512Mi"
               cpu: "250m"
-            limits:
-              memory: "768Mi"
-              cpu: "500m"

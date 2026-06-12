@@ -1,6 +1,6 @@
 # Lesson 16 — Sidecar Pattern: Distributed Tracing with Zipkin
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** Sidecar container, multi-container Pod, shared volumes between containers
 **Spring Boot Concepts:** Micrometer Tracing, Brave, Zipkin reporter, trace/span propagation
 
@@ -137,6 +137,24 @@ tracing bridge is **Brave** (Zipkin's client library). The reporter sends spans 
 Add to each service's `pom.xml`:
 
 ```xml
+<!-- Spring Boot 4 tracing auto-configuration -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-micrometer-tracing</artifactId>
+</dependency>
+
+<!-- Brave tracer and propagation auto-configuration -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-micrometer-tracing-brave</artifactId>
+</dependency>
+
+<!-- Spring Boot 4 Zipkin exporter auto-configuration -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-zipkin</artifactId>
+</dependency>
+
 <!-- Micrometer tracing with Brave bridge -->
 <dependency>
     <groupId>io.micrometer</groupId>
@@ -157,13 +175,17 @@ management:
   tracing:
     sampling:
       probability: 1.0           # sample 100% of requests (dev only; use 0.1 in prod)
-  zipkin:
-    tracing:
-      endpoint: http://zipkin:9411/api/v2/spans
+    export:
+      zipkin:
+        endpoint: http://zipkin:9411/api/v2/spans
 ```
 
-Spring Boot auto-configures HTTP tracing once those dependencies and config are present.
+Spring Boot 4 auto-configures HTTP tracing once those dependencies and config are present.
 No controller code changes are needed.
+
+> **Project note:** ShopNow uses `config-server` as the source of truth for Spring
+> application config. Do not duplicate these tracing properties into Kubernetes
+> environment variables unless you are deliberately overriding config-server values.
 
 ---
 
@@ -175,7 +197,7 @@ Zipkin is a standalone service — it collects and stores spans sent by your Spr
 services. In this lesson it runs as a regular Deployment (not a sidecar), because it
 is shared infrastructure, not a per-pod helper.
 
-Create `k8s/infrastructure/zipkin.yaml`:
+`k8s/infrastructure/zipkin.yaml`:
 
 ```yaml
 apiVersion: apps/v1
@@ -217,7 +239,7 @@ spec:
               cpu: "250m"
 ```
 
-Create `k8s/infrastructure/zipkin-svc.yaml`:
+`k8s/infrastructure/zipkin-svc.yaml`:
 
 ```yaml
 apiVersion: v1
@@ -237,7 +259,7 @@ spec:
       targetPort: 9411
 ```
 
-Apply:
+Apply when you are ready:
 
 ```bash
 kubectl apply -f k8s/infrastructure/zipkin.yaml
@@ -261,6 +283,18 @@ For each of these services, add the two dependencies to `pom.xml`:
 
 ```xml
 <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-micrometer-tracing</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-micrometer-tracing-brave</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-zipkin</artifactId>
+</dependency>
+<dependency>
     <groupId>io.micrometer</groupId>
     <artifactId>micrometer-tracing-bridge-brave</artifactId>
 </dependency>
@@ -270,21 +304,33 @@ For each of these services, add the two dependencies to `pom.xml`:
 </dependency>
 ```
 
-### 3. Add tracing config to each service in your config repo
+For `order-service`, add Feign's Micrometer integration too. This lets OpenFeign create
+observed client spans and propagate trace headers to `product-service` and
+`inventory-service`:
 
-Append to each service YAML in `shopnow-config/`:
+```xml
+<dependency>
+    <groupId>io.github.openfeign</groupId>
+    <artifactId>feign-micrometer</artifactId>
+</dependency>
+```
+
+### 3. Confirm tracing config in the config repo
+
+Each traced service should receive these values from `shopnow-config/` through
+`config-server`:
 
 ```yaml
 management:
   tracing:
     sampling:
       probability: 1.0
-  zipkin:
-    tracing:
-      endpoint: http://zipkin:9411/api/v2/spans
+    export:
+      zipkin:
+        endpoint: http://zipkin:9411/api/v2/spans
 ```
 
-Commit and push the config repo, then rebuild and redeploy each service:
+Commit and push the config repo if needed, then rebuild and redeploy each service:
 
 ```bash
 eval $(minikube docker-env)
@@ -292,13 +338,18 @@ eval $(minikube docker-env)
 for svc in api-gateway product-service order-service inventory-service user-service cart-service notification-service config-server discovery-server; do
   echo "Building $svc..."
   cd services/$svc
-  ./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/$svc:latest -q
+  ./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/${svc}:latest -q
   cd ../..
   kubectl rollout restart deployment/$svc -n shopnow
 done
 
 kubectl rollout status deployment/product-service -n shopnow --timeout=120s
 ```
+
+> **Why `${svc}` and not `$svc`?** In zsh, `$svc:latest` can be interpreted as a
+> parameter expansion with a modifier, producing bad image names such as
+> `shopnow/api-gatewayatest:latest`. Braces make the variable boundary explicit:
+> `shopnow/${svc}:latest`.
 
 ### 4. Open the Zipkin UI
 
@@ -352,7 +403,7 @@ instrumentation is also enabled.
 Add a sidecar to the **product-service** Deployment that streams application logs to
 stdout (simulating a log shipper):
 
-Edit `k8s/product-service/deployment.yaml` to add a second container and a shared volume:
+`k8s/product-service/deployment.yaml` now includes a second container and a shared volume:
 
 ```yaml
 spec:
@@ -367,7 +418,7 @@ spec:
 
         - name: log-shipper          # ← sidecar
           image: busybox:1.36
-          command: ["sh", "-c", "tail -F /var/log/app/app.log 2>/dev/null || sleep infinity"]
+          command: ["sh", "-c", "while [ ! -f /var/log/app/app.log ]; do sleep 2; done; tail -n +1 -f /var/log/app/app.log"]
           volumeMounts:
             - name: app-logs
               mountPath: /var/log/app
@@ -415,7 +466,22 @@ and re-apply.
 
 ## Notes & Learnings
 
-> _Record anything surprising, problems you hit, or insights you had._
+- Spring Boot 4 splits observability auto-configuration into smaller modules. For
+  Zipkin tracing with Brave, the services need `spring-boot-micrometer-tracing`,
+  `spring-boot-micrometer-tracing-brave`, `spring-boot-zipkin`,
+  `micrometer-tracing-bridge-brave`, and `zipkin-reporter-brave`.
+- Boot 4 uses `management.tracing.export.zipkin.endpoint`, not the older
+  `management.zipkin.tracing.endpoint` key.
+- OpenFeign does not automatically create observed client spans unless
+  `feign-micrometer` is on the classpath. `order-service` needs it so the
+  `api-gateway -> order-service -> product-service/inventory-service` trace stays
+  connected.
+- In zsh, use `shopnow/${svc}:latest` in image build loops. `shopnow/$svc:latest`
+  can be parsed as a zsh parameter modifier and produce image names like
+  `shopnow/api-gatewayatest:latest`.
+- Zipkin's waterfall view showed the completed order trace as:
+  `api-gateway -> order-service -> product-service -> inventory-service`, with
+  order-service producing the outgoing Feign client spans.
 
 ---
 

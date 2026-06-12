@@ -36,6 +36,11 @@ spec:
                 secretKeyRef:
                   name: product-db-credentials
                   key: POSTGRES_PASSWORD
+            - name: LOGGING_FILE_NAME
+              value: /var/log/app/app.log
+          volumeMounts:
+            - name: app-logs
+              mountPath: /var/log/app
           startupProbe:
             httpGet:
               path: /actuator/health
@@ -61,3 +66,23 @@ spec:
             limits:
               memory: "768Mi"
               cpu: "500m"
+        - name: log-shipper
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - while [ ! -f /var/log/app/app.log ]; do sleep 2; done; tail -n +1 -f /var/log/app/app.log
+          volumeMounts:
+            - name: app-logs
+              mountPath: /var/log/app
+              readOnly: true
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "10m"
+            limits:
+              memory: "32Mi"
+              cpu: "25m"
+      volumes:
+        - name: app-logs
+          emptyDir: {}
