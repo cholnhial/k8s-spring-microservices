@@ -42,7 +42,7 @@ See [`CLAUDE.md`](CLAUDE.md) for the full architecture diagram and service list.
 
 ```bash
 # 1. Start the cluster
-minikube start --cpus=4 --memory=8192 --driver=docker
+minikube start --cpus=4 --memory=12288 --driver=docker # sorry 8GB was not enough
 
 # 2. Enable required addons
 minikube addons enable ingress
@@ -60,7 +60,7 @@ kubectl apply -f k8s/namespaces/shopnow.yaml
 
 ```bash
 # Start / stop the cluster
-minikube start --cpus=4 --memory=8192
+minikube start --cpus=4 --memory=12288 --driver=docker # sorry 8GB was not enough
 minikube stop
 
 # Open the Kubernetes web dashboard
@@ -77,7 +77,8 @@ minikube ip
 eval $(minikube docker-env)
 
 # Build a service image directly into Minikube (no registry needed)
-docker build -t shopnow/<service-name>:latest services/<service-name>/
+cd <service-name>
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=shopnow/<service-name>:latest -D skipTests
 ```
 
 ### Applying Manifests
