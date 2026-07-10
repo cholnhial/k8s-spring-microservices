@@ -114,7 +114,7 @@ Tick a box by changing `[ ]` to `[x]`.
 
 ### Phase 6 — Production Readiness
 
-- [ ] **Lesson 17** — [HorizontalPodAutoscaler: Scaling Services](lessons/lesson-17-hpa.md)
+- [x] **Lesson 17** — [HorizontalPodAutoscaler: Scaling Services](lessons/lesson-17-hpa.md)
 - [ ] **Lesson 18** — [Rolling Updates, Rollbacks & Blue/Green Deploys](lessons/lesson-18-updates.md)
 - [ ] **Lesson 19** — [Helm Charts: Packaging the Platform](lessons/lesson-19-helm.md)
 - [ ] **Lesson 20** — [NetworkPolicy, ResourceQuotas & Hardening](lessons/lesson-20-hardening.md)

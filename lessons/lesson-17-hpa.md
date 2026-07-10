@@ -1,6 +1,6 @@
 # Lesson 17 — HorizontalPodAutoscaler: Scaling Services
 
-**Status:** [ ] Complete
+**Status:** [x] Complete
 **K8s Concepts:** HorizontalPodAutoscaler (HPA), metrics-server, CPU/memory scaling targets, scaling behaviour
 **Spring Boot Concepts:** Spring Boot Actuator metrics, JVM tuning for horizontal scaling
 
@@ -432,19 +432,22 @@ Ingress -> frontend -> gateway path the browser uses:
 # Login first; api-gateway protects order-service.
 TOKEN=$(curl -s -X POST http://shopnow.local/api/users/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"password"}' | jq -r .token)
+  -d '{"username":"alice","password":"secret"}' | jq -r .token)
 
-# Sustained load — hit the orders endpoint 10 requests/second for 2 minutes.
-# Adjust the product ID to one that exists in your DB.
-for i in $(seq 1 1200); do
-  curl -s -o /dev/null -w "%{http_code}\n" \
-    -X POST http://shopnow.local/api/orders \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"orderLineItems":[{"productId":1,"quantity":1}]}' &
-  sleep 0.1
-done
+COUNT=1
+
+while [ $COUNT -le 1000 ]; do
+	echo "CURL $COUNT"
+      curl -q --request GET \
+	  --url http://shopnow.local/api/orders \
+	  --header "authorization: Bearer $TOKEN" &> /dev/null &
+	((COUNT++))
+	sleep 1
+	
+done 
+
 ```
+Create a user if one doesn't exist already.
 
 > This is a rough load generator. For real load testing you'd use tools like `hey`, `wrk`,
 > or `k6` — but `curl` in a loop is enough to push CPU above 60% on a single pod.

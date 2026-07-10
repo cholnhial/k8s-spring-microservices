@@ -100,21 +100,21 @@ Tick a box by changing `[ ]` to `[x]`.
 - [x] **Lesson 09** — [Ingress: API Gateway as the Single Entry Point](lessons/lesson-09-ingress.md)
 - [x] **Lesson 10** — [Namespaces & Resource Limits: Order Service](lessons/lesson-10-order-service.md)
 - [x] **Lesson 11** — [Circuit Breaker & Resilience: Inventory Service](lessons/lesson-11-inventory-service.md)
-- [ ] **Lesson 12** — [RBAC & ServiceAccounts: User Service](lessons/lesson-12-user-service.md)
+- [x] **Lesson 12** — [RBAC & ServiceAccounts: User Service](lessons/lesson-12-user-service.md)
 
 ### Phase 4 — Stateful & Event-Driven Services
 
-- [ ] **Lesson 13** — [Redis StatefulSet: Cart Service](lessons/lesson-13-cart-service.md)
-- [ ] **Lesson 14** — [Kafka StatefulSet & Headless Services: Notification Service](lessons/lesson-14-notification-service.md)
+- [x] **Lesson 13** — [Redis StatefulSet: Cart Service](lessons/lesson-13-cart-service.md)
+- [x] **Lesson 14** — [Kafka StatefulSet & Headless Services: Notification Service](lessons/lesson-14-notification-service.md)
 
 ### Phase 5 — Frontend & Observability
 
-- [ ] **Lesson 15** — [nginx + Angular: Frontend Deployment](lessons/lesson-15-frontend.md)
-- [ ] **Lesson 16** — [Sidecar Pattern: Distributed Tracing with Zipkin](lessons/lesson-16-tracing.md)
+- [x] **Lesson 15** — [nginx + Angular: Frontend Deployment](lessons/lesson-15-frontend.md)
+- [x] **Lesson 16** — [Sidecar Pattern: Distributed Tracing with Zipkin](lessons/lesson-16-tracing.md)
 
 ### Phase 6 — Production Readiness
 
-- [ ] **Lesson 17** — [HorizontalPodAutoscaler: Scaling Services](lessons/lesson-17-hpa.md)
+- [x] **Lesson 17** — [HorizontalPodAutoscaler: Scaling Services](lessons/lesson-17-hpa.md)
 - [ ] **Lesson 18** — [Rolling Updates, Rollbacks & Blue/Green Deploys](lessons/lesson-18-updates.md)
 - [ ] **Lesson 19** — [Helm Charts: Packaging the Platform](lessons/lesson-19-helm.md)
 - [ ] **Lesson 20** — [NetworkPolicy, ResourceQuotas & Hardening](lessons/lesson-20-hardening.md)
