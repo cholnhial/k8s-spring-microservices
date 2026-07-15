@@ -544,12 +544,32 @@ the pod template did not change, but the mounted/configured runtime behavior did
 
 ### 6. Blue/green for product-service
 
-Now the more involved pattern. You'll split product-service's single Deployment into
-two slots (`blue`, `green`) and flip traffic by editing the Service selector.
+Now the more involved pattern. The demo manifests live in
+`k8s/product-service/blue-green/` so the normal `product-service` Deployment remains
+intact for the rest of the course. You'll run two slots (`blue`, `green`) and flip
+traffic by editing the main Service selector.
 
-#### 6a. Edit the product-service Service to select by slot
+> Important: delete the normal `product-service` Deployment and HPA before applying
+> the blue/green demo. The normal Deployment selector is `app: product-service`, which
+> overlaps both slot Deployments. Restore it after the exercise.
 
-Edit `k8s/product-service/service.yaml` and add `slot: blue` to the selector:
+#### 6a. Prepare the blue slot
+
+The blue slot is already scaffolded at
+`k8s/product-service/blue-green/product-service-blue.yaml`. It carries the normal
+`app: product-service` label plus `slot: blue`.
+
+Delete the normal controller and make blue live:
+
+```bash
+kubectl delete hpa product-service-hpa -n shopnow --ignore-not-found=true
+kubectl delete deployment product-service -n shopnow --ignore-not-found=true
+kubectl apply -f k8s/product-service/blue-green/product-service-blue.yaml
+kubectl rollout status deployment/product-service-blue -n shopnow
+kubectl patch svc/product-service -n shopnow -p '{"spec":{"selector":{"app":"product-service","slot":"blue"}}}'
+```
+
+The main Service selector should now look like:
 
 ```yaml
 apiVersion: v1
@@ -569,72 +589,25 @@ spec:
       targetPort: 8081
 ```
 
-#### 6b. Rename the existing Deployment to the blue slot
+#### 6b. Create and test green
 
-Edit `k8s/product-service/deployment.yaml`:
+The green Deployment and private test Service are scaffolded at:
 
-- Change `metadata.name` to `product-service-blue`
-- Add `slot: blue` to the `metadata.labels`, `spec.selector.matchLabels`, and
-  `spec.template.metadata.labels`
-
-Apply:
-
-```bash
-# Delete the old Deployment (the Service keeps running on its endpoints briefly)
-kubectl delete deployment product-service -n shopnow
-
-# Apply the renamed blue Deployment and updated Service
-kubectl apply -f k8s/product-service/deployment.yaml
-kubectl apply -f k8s/product-service/service.yaml
-
-# Verify traffic still works
-kubectl port-forward svc/product-service 8081:8081 -n shopnow &
-curl -s http://localhost:8081/api/products | head -c 200
-```
-
-#### 6c. Create a green Deployment
-
-Copy `k8s/product-service/deployment.yaml` to `k8s/product-service/deployment-green.yaml`
-and edit it:
-
-- `metadata.name`: `product-service-green`
-- All `slot: blue` labels → `slot: green`
-- You can point this at a different image tag when you have one; for now, reuse the
-  same image (the demo is about the traffic flip, not the code change)
-
-Create a private test Service that targets only green pods —
-`k8s/product-service/service-green-test.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: product-service-green-test
-  namespace: shopnow
-  labels:
-    app: product-service
-    part-of: shopnow
-spec:
-  selector:
-    app: product-service
-    slot: green
-  ports:
-    - port: 8081
-      targetPort: 8081
-```
+- `k8s/product-service/blue-green/product-service-green.yaml`
+- `k8s/product-service/blue-green/product-service-green-test-service.yaml`
 
 Apply both:
 
 ```bash
-kubectl apply -f k8s/product-service/deployment-green.yaml
-kubectl apply -f k8s/product-service/service-green-test.yaml
+kubectl apply -f k8s/product-service/blue-green/product-service-green.yaml
+kubectl apply -f k8s/product-service/blue-green/product-service-green-test-service.yaml
 kubectl rollout status deployment/product-service-green -n shopnow
 ```
 
 At this point both blue and green are running; only blue receives real traffic (via
 the main Service), while green can be smoke-tested via the test Service.
 
-#### 6d. Smoke test green, then flip
+#### 6c. Smoke test green, then flip
 
 ```bash
 # Smoke test green directly
@@ -651,7 +624,7 @@ curl -s http://localhost:8081/api/products | head -c 200
 kubectl logs -l slot=green -n shopnow --tail=5
 ```
 
-#### 6e. Roll back the flip (seconds, not minutes)
+#### 6d. Roll back the flip (seconds, not minutes)
 
 Suppose you discover a bug. Flip back:
 
@@ -662,7 +635,7 @@ kubectl patch svc/product-service -n shopnow -p '{"spec":{"selector":{"app":"pro
 Traffic returns to blue immediately — no image pulls, no pod churn, no readiness wait.
 **This is the power of blue/green: instant rollback.**
 
-#### 6f. Cleanup after a successful flip
+#### 6e. Cleanup after a successful flip
 
 Once you're confident green is stable:
 
@@ -683,15 +656,12 @@ For the rest of the course, we don't need the blue/green split. Revert:
 
 ```bash
 # Delete both slots
-kubectl delete deployment product-service-blue product-service-green -n shopnow
-kubectl delete svc product-service-green-test -n shopnow
+kubectl delete -f k8s/product-service/blue-green/
 
-# Remove the slot label from the main Service selector
-# (edit k8s/product-service/service.yaml, remove the slot: blue line)
-
-# Rename deployment-green.yaml → deployment.yaml, remove slot labels
-# Apply the restored manifests
-kubectl apply -f k8s/product-service/
+# Restore the standard Deployment, Service selector, and HPA
+kubectl apply -f k8s/product-service/deployment.yaml
+kubectl apply -f k8s/product-service/service.yaml
+kubectl apply -f k8s/product-service/hpa.yaml
 ```
 
 ### 8. Observe the graceful shutdown in logs

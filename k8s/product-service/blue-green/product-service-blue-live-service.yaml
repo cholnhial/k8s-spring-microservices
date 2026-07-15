@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service-blue-live
+  namespace: shopnow
+  labels:
+    app: product-service
+    part-of: shopnow
+    version: "1.0"
+    slot: blue
+spec:
+  selector:
+    app: product-service
+    slot: blue
+  ports:
+    - port: 8081
+      targetPort: 8081
