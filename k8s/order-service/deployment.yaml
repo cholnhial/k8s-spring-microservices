@@ -48,6 +48,11 @@ spec:
                 secretKeyRef:
                   name: order-db-credentials
                   key: POSTGRES_PASSWORD
+            - name: ORDER_SERVICE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: shopnow-oauth2-client-secrets
+                  key: ORDER_SERVICE_CLIENT_SECRET
           startupProbe:
             httpGet:
               path: /actuator/health

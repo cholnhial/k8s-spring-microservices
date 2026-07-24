@@ -43,6 +43,7 @@ production-relevant patterns. Every service exists to introduce one or more K8s 
                           |  notification-service -- kafka     |
                           |  config-server                     |
                           |  discovery-server (Eureka)         |
+                          |  keycloak (branch experiment)      |
                           |  zipkin (tracing)                  |
                           +-----------------------------------+
 ```
@@ -61,11 +62,14 @@ production-relevant patterns. Every service exists to introduce one or more K8s 
 | `cart-service` | 8085 | Cache-aside (Redis) | StatefulSet (Redis) |
 | `notification-service` | 8086 | Event-driven (Kafka) | Headless Service, StatefulSet (Kafka) |
 | `frontend` | 80 | — | ConfigMap for nginx.conf, Deployment |
+| `keycloak` | 8080 | Service-to-service OAuth2 (branch experiment) | Secret-backed realm import, Deployment |
 
 ### Tech Stack
 
 - **Java 21** + **Spring Boot 3.x**
+- **Spring Boot 4.x** OAuth2 client + HTTP interfaces are explored on the `keycloak` branch
 - **Spring Cloud** (Gateway, Eureka, Config, OpenFeign, Resilience4j)
+- **Keycloak 26.x** (branch experiment for service-to-service OAuth2)
 - **PostgreSQL 16** (product, order, inventory, user DBs)
 - **Redis 7** (cart)
 - **Apache Kafka 3** (events)
@@ -115,6 +119,7 @@ Tick a box by changing `[ ]` to `[x]`.
 ### Phase 6 — Production Readiness
 
 - [x] **Lesson 17** — [HorizontalPodAutoscaler: Scaling Services](lessons/lesson-17-hpa.md)
+- [ ] **Lesson 18a** — [Keycloak: Service-to-Service OAuth2](lessons/lesson-18a-keycloak.md) *(branch experiment)*
 - [ ] **Lesson 18** — [Rolling Updates, Rollbacks & Blue/Green Deploys](lessons/lesson-18-updates.md)
 - [ ] **Lesson 19** — [Helm Charts: Packaging the Platform](lessons/lesson-19-helm.md)
 - [ ] **Lesson 20** — [NetworkPolicy, ResourceQuotas & Hardening](lessons/lesson-20-hardening.md)
@@ -139,6 +144,7 @@ k8s-spring-microservices/
 │   ├── user-service/
 │   ├── cart-service/
 │   ├── notification-service/
+│   ├── keycloak/
 │   └── frontend/
 ├── helm/                            <- Helm chart (Phase 6)
 ├── services/                        <- Spring Boot source code
@@ -207,3 +213,4 @@ minikube dashboard
 | 3 | Raw manifests before Helm | Understand the primitives before the abstraction |
 | 4 | PostgreSQL per service (not shared) | Database-per-service is the correct microservices pattern |
 | 5 | Angular + nginx frontend | Allows nginx ConfigMap lesson and static asset serving |
+| 6 | Keycloak is isolated on the `keycloak` branch first | Lets us validate Spring-managed service-to-service OAuth2 before merging it into the main curriculum |

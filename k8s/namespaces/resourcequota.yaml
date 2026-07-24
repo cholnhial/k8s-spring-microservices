@@ -5,8 +5,8 @@ metadata:
   namespace: shopnow
 spec:
   hard:
-    requests.cpu: "8"
-    requests.memory: "8Gi"
+    requests.cpu: "16"
+    requests.memory: "10Gi"
     limits.cpu: "10"
     limits.memory: "16Gi"
-    pods: "26"
+    pods: "40"

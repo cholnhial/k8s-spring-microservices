@@ -1,15 +1,17 @@
 package dev.chol.shopnow.order_service.client;
 
 import dev.chol.shopnow.order_service.dto.InventoryResponse;
-import org.springframework.cloud.openfeign.FeignClient;
-import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.security.oauth2.client.annotation.ClientRegistrationId;
+import org.springframework.web.service.annotation.GetExchange;
+import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
 
-@FeignClient(name = "inventory-service")
+@HttpExchange("/api/inventory")
+@ClientRegistrationId("order-service")
 public interface InventoryClient {
 
-    @GetMapping("/api/inventory")
+    @GetExchange
     List<InventoryResponse> checkStock(@RequestParam List<String> skuCodes);
 }
